@@ -98,11 +98,18 @@ export function getParent(personId: string, personMap: Map<string, Person>): str
   return personMap.get(personId)?.parentId ?? null;
 }
 
+export function getYear(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const year = parseInt(dateStr.slice(0, 4), 10);
+  return isNaN(year) ? null : year;
+}
+
 /** 计算寿命 */
 export function calculateLifespan(person: Person): number | null {
   if (!person.birthDate || !person.deathDate) return null;
-  const birthYear = new Date(person.birthDate).getFullYear();
-  const deathYear = new Date(person.deathDate).getFullYear();
+  const birthYear = getYear(person.birthDate);
+  const deathYear = getYear(person.deathDate);
+  if (birthYear == null || deathYear == null) return null;
   return deathYear - birthYear;
 }
 

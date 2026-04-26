@@ -2,29 +2,43 @@ import { useMemo, useRef, useEffect } from 'react';
 import { Card, Row, Col, Statistic } from 'antd';
 import * as echarts from 'echarts';
 import type { Person } from '../types';
+import { buildChildrenMap, getDescendants } from '../utils/tree';
 
 interface StatisticsPanelProps {
   persons: Person[];
   rangeStart: number;
   rangeEnd: number;
+  basePersonId?: string | null;
 }
 
-/** 判断某人在某年是否存活 */
+function getYear(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const year = parseInt(dateStr.slice(0, 4), 10);
+  return isNaN(year) ? null : year;
+}
+
+/** 判断某人在某年是否存活；若无去世年份，按出生年份+100估算 */
 function isAliveInYear(person: Person, year: number): boolean {
-  const birthYear = person.birthDate ? new Date(person.birthDate).getFullYear() : null;
-  const deathYear = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
+  const birthYear = getYear(person.birthDate);
+  const deathYear = getYear(person.deathDate);
   if (!birthYear) return false;
   if (year < birthYear) return false;
-  if (deathYear && year > deathYear) return false;
+  const effectiveDeathYear = deathYear ?? (birthYear + 100);
+  if (year > effectiveDeathYear) return false;
   return true;
 }
 
-/** 获取在某年存活的人 */
+/** 获取在时间范围内存活的人；若无去世年份，按出生年份+100估算 */
 function getAlivePersons(persons: Person[], startYear: number, endYear: number): Person[] {
-  return persons.filter((p) => isAliveInYear(p, startYear) || isAliveInYear(p, endYear) || 
-    (p.birthDate && new Date(p.birthDate).getFullYear() <= endYear && 
-     (!p.deathDate || new Date(p.deathDate).getFullYear() >= startYear))
-  );
+  return persons.filter((p) => {
+    const birthYear = getYear(p.birthDate);
+    const deathYear = getYear(p.deathDate);
+    // 无出生日期，默认计入（族谱中有记录但生卒年不详）
+    if (birthYear == null) return true;
+    // 有出生日期，判定生命周期与时间范围是否有交集
+    const effectiveDeathYear = deathYear ?? (birthYear + 100);
+    return birthYear <= endYear && effectiveDeathYear >= startYear;
+  });
 }
 
 /** 年龄段标签 */
@@ -111,11 +125,41 @@ function EChartsBar({ data, title, height = 200 }: { data: { name: string; value
   return <div ref={ref} style={{ width: '100%', height }} />;
 }
 
-export default function StatisticsPanel({ persons, rangeStart, rangeEnd }: StatisticsPanelProps) {
+export default function StatisticsPanel({ persons, rangeStart, rangeEnd, basePersonId }: StatisticsPanelProps) {
+  const scopedPersons = useMemo(() => {
+    if (!basePersonId) return persons;
+    const childrenMap = buildChildrenMap(persons);
+    const descendantIds = new Set([basePersonId, ...getDescendants(basePersonId, childrenMap)]);
+    return persons.filter((p) => descendantIds.has(p.id));
+  }, [persons, basePersonId]);
+
+  const scopedYearRange = useMemo(() => {
+    let min = 9999;
+    let max = 0;
+    for (const p of scopedPersons) {
+      const by = getYear(p.birthDate);
+      const dy = getYear(p.deathDate);
+      const effectiveDy = dy ?? (by != null ? by + 100 : null);
+      if (by != null) { if (by < min) min = by; if (by > max) max = by; }
+      if (effectiveDy != null && effectiveDy > max) max = effectiveDy;
+    }
+    return min <= max ? { start: min, end: max } : null;
+  }, [scopedPersons]);
+
+  const displayRange = useMemo(() => {
+    if (basePersonId && scopedYearRange) return scopedYearRange;
+    return { start: rangeStart, end: rangeEnd };
+  }, [basePersonId, scopedYearRange, rangeStart, rangeEnd]);
+
   const alivePersons = useMemo(
-    () => getAlivePersons(persons, rangeStart, rangeEnd),
-    [persons, rangeStart, rangeEnd],
+    () => getAlivePersons(scopedPersons, displayRange.start, displayRange.end),
+    [scopedPersons, displayRange],
   );
+
+  const basePerson = basePersonId ? persons.find((p) => p.id === basePersonId) : undefined;
+  const cardTitle = basePerson
+    ? `${basePerson.name} 子树统计 (${displayRange.start}-${displayRange.end})`
+    : `统计信息 (${displayRange.start}-${displayRange.end})`;
 
   // 性别分布
   const genderData = useMemo(() => {
@@ -144,10 +188,10 @@ export default function StatisticsPanel({ persons, rangeStart, rangeEnd }: Stati
 
   // 年龄段分布（按范围中点年份算）
   const ageData = useMemo(() => {
-    const midYear = Math.floor((rangeStart + rangeEnd) / 2);
+    const midYear = Math.floor((displayRange.start + displayRange.end) / 2);
     const map = new Map<string, number>();
     for (const p of alivePersons) {
-      const birthYear = p.birthDate ? new Date(p.birthDate).getFullYear() : null;
+      const birthYear = getYear(p.birthDate);
       if (!birthYear) continue;
       const age = midYear - birthYear;
       const label = ageRangeLabel(age);
@@ -157,7 +201,7 @@ export default function StatisticsPanel({ persons, rangeStart, rangeEnd }: Stati
     return order
       .filter((l) => map.has(l))
       .map((name) => ({ name, value: map.get(name) || 0 }));
-  }, [alivePersons, rangeStart, rangeEnd]);
+  }, [alivePersons, displayRange]);
 
   // 世代分布
   const generationData = useMemo(() => {
@@ -175,9 +219,9 @@ export default function StatisticsPanel({ persons, rangeStart, rangeEnd }: Stati
 
   if (alivePersons.length === 0) {
     return (
-      <Card title="统计信息" size="small" style={{ marginTop: 16 }}>
+      <Card title={cardTitle} size="small" style={{ marginTop: 16 }}>
         <div style={{ textAlign: 'center', color: '#999', padding: 16 }}>
-          该时间范围内无存活族人
+          {basePerson ? '该子树在时间范围内无存活族人' : '该时间范围内无存活族人'}
         </div>
       </Card>
     );
@@ -185,7 +229,7 @@ export default function StatisticsPanel({ persons, rangeStart, rangeEnd }: Stati
 
   return (
     <Card
-      title={'统计信息 (' + rangeStart + '-' + rangeEnd + ')'}
+      title={cardTitle}
       size="small"
       style={{ marginTop: 16 }}
     >

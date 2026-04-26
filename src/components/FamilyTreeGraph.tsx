@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Graph, treeToGraphData, register, Rect } from '@antv/g6';
+import type { Point } from '@antv/g6';
 import { Text } from '@antv/g';
 import type { Group } from '@antv/g';
 import type { Person, FamilyTreeData, KinshipResult } from '../types';
@@ -9,6 +10,7 @@ import {
   findShortestPath,
   getParent,
   getChildren,
+  getYear,
 } from '../utils/tree';
 import { calculateKinship } from '../utils/kinship';
 
@@ -28,6 +30,7 @@ const BRANCH_PALETTE = [
 
 const DEFAULT_COLOR = '#7f8c8d';
 const FEMALE_COLOR = '#ad1457';
+const ANIMATION_NODE_THRESHOLD = 200;
 
 function getBranchColor(branch: string | null): string {
   if (!branch) return DEFAULT_COLOR;
@@ -37,9 +40,6 @@ function getBranchColor(branch: string | null): string {
   }
   return BRANCH_PALETTE[Math.abs(hash) % BRANCH_PALETTE.length];
 }
-
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-interface FamilyNodeStyleProps extends Record<string, any> {}
 
 let registered = false;
 
@@ -108,7 +108,7 @@ function ensureCustomNodeRegistered() {
   registered = true;
 }
 
-function transformToTreeData(data: FamilyTreeData) {
+function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
   const personMap = buildPersonMap(data.persons);
   const childrenMap = buildChildrenMap(data.persons);
 
@@ -125,6 +125,7 @@ function transformToTreeData(data: FamilyTreeData) {
       : person.generation + '世' + migrationPart;
 
     const isFlagged = person.needsVerification;
+    const isCollapsed = collapsedIds.has(person.id);
     return {
       id: person.id,
       data: { ...person, nodeColor },
@@ -141,7 +142,7 @@ function transformToTreeData(data: FamilyTreeData) {
         personName: person.name,
         personSubText: subText,
         hasChildren: childIds.length > 0,
-        collapsed: false,
+        collapsed: isCollapsed,
         needsVerification: isFlagged,
         migrationLocation: person.migrationLocation,
         label: false,
@@ -163,24 +164,30 @@ export default function FamilyTreeGraph({
 }: FamilyTreeGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
+  const collapsedIdsRef = useRef<Set<string>>(new Set());
+  const prevHighlightRef = useRef<string[]>([]);
+  const prevYearHighlightRef = useRef<string[]>([]);
+  const onNodeSelectRef = useRef(onNodeSelect);
+  const onKinshipResultRef = useRef(onKinshipResult);
+  const selectedIdsRef = useRef(selectedIds);
+  const savedViewportRef = useRef<{
+    zoom: number;
+    cameraPos: Point;
+    nodePos: Point | null;
+    selectedNodeId: string | undefined;
+  } | null>(null);
 
-  // 数据变化时：销毁重建图，然后聚焦到选中节点
+  onNodeSelectRef.current = onNodeSelect;
+  onKinshipResultRef.current = onKinshipResult;
+  selectedIdsRef.current = selectedIds;
+
+  // 数据变化：销毁重建图（G6 树图最可靠的方式），但保存缩放和折叠状态
   useEffect(() => {
     if (!containerRef.current) return;
 
     ensureCustomNodeRegistered();
 
-    const hadGraph = graphRef.current !== null;
-    let savedZoom = 1;
-
-    // 销毁旧图前保存缩放比例
-    if (graphRef.current) {
-      savedZoom = graphRef.current.getZoom();
-      graphRef.current.destroy();
-      graphRef.current = null;
-    }
-
-    const treeData = transformToTreeData(data);
+    const treeData = transformToTreeData(data, collapsedIdsRef.current);
     const graphData = treeToGraphData(treeData);
 
     const graph = new Graph({
@@ -210,9 +217,14 @@ export default function FamilyTreeGraph({
       behaviors: [
         { type: 'drag-canvas', enable: true },
         'zoom-canvas',
-        'collapse-expand',
+        {
+          type: 'collapse-expand',
+          trigger: 'dblclick',
+          onCollapse: (id: string) => collapsedIdsRef.current.add(id),
+          onExpand: (id: string) => collapsedIdsRef.current.delete(id),
+        },
       ],
-      animation: true,
+      animation: data.persons.length <= ANIMATION_NODE_THRESHOLD,
       padding: 30,
     });
 
@@ -223,32 +235,59 @@ export default function FamilyTreeGraph({
       if (nodeId) {
         const originalEvent = evt.originalEvent as MouseEvent | undefined;
         const isMulti = originalEvent?.ctrlKey || originalEvent?.metaKey;
-        onNodeSelect(nodeId, !!isMulti);
+        onNodeSelectRef.current(nodeId, !!isMulti);
       }
     });
 
     (window as any).__familyTreeGraph = graph;
 
-    graph.render().then(() => {
-      // 首次渲染适配视图；后续渲染恢复缩放
-      if (!hadGraph) {
+    const saved = savedViewportRef.current;
+    if (!saved) {
+      graph.render().then(() => {
         graph.fitView().catch(() => {});
-      } else {
-        graph.zoomTo(savedZoom, false).catch(() => {});
-      }
+      });
+    } else {
+      graph.render().then(async () => {
+        const [w, h] = graph.getCanvas().getSize();
+        const cx = w / 2;
+        const cy = h / 2;
 
-      if (selectedIds.length > 0) {
-        setTimeout(() => {
-          try {
-            graph.focusElement(selectedIds[0], true);
-          } catch {}
-        }, 100);
-      }
-    });
+        let targetCameraPos = saved.cameraPos;
+        if (saved.selectedNodeId && saved.nodePos && graph.hasNode(saved.selectedNodeId)) {
+          const newNodePos = graph.getElementPosition(saved.selectedNodeId);
+          const deltaX = newNodePos[0] - saved.nodePos[0];
+          const deltaY = newNodePos[1] - saved.nodePos[1];
+          targetCameraPos = [
+            saved.cameraPos[0] + deltaX,
+            saved.cameraPos[1] + deltaY,
+          ];
+        }
+
+        const translateX = (cx - targetCameraPos[0]) * saved.zoom;
+        const translateY = (cy - targetCameraPos[1]) * saved.zoom;
+
+        await graph.zoomTo(saved.zoom, false).catch(() => {});
+        await graph.translateTo([translateX, translateY], false).catch(() => {});
+      });
+    }
 
     return () => {
-      if (graphRef.current) {
-        graphRef.current.destroy();
+      const g = graphRef.current;
+      if (g) {
+        try {
+          const selectedNodeId = selectedIdsRef.current[0];
+          let savedNodePos: Point | null = null;
+          if (selectedNodeId) {
+            try { savedNodePos = g.getElementPosition(selectedNodeId); } catch {}
+          }
+          savedViewportRef.current = {
+            zoom: g.getZoom(),
+            cameraPos: g.getPosition(),
+            nodePos: savedNodePos,
+            selectedNodeId,
+          };
+        } catch {}
+        try { g.destroy(); } catch {}
         graphRef.current = null;
       }
       (window as any).__familyTreeGraph = undefined;
@@ -259,75 +298,112 @@ export default function FamilyTreeGraph({
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph || selectedIds.length === 0) return;
-    setTimeout(() => {
+    // 使用 requestAnimationFrame 替代 setTimeout，更轻量
+    requestAnimationFrame(() => {
       try {
-        graph.focusElement(selectedIds[0], true);
+        graph.focusElement(selectedIds[0], false);
       } catch {}
-    }, 100);
+    });
   }, [selectedIds]);
 
-  // 处理选中高亮
+  // 处理选中高亮——只操作相关节点，不遍历全图
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
 
-    const allNodes = graph.getNodeData();
-    const allEdges = graph.getEdgeData();
-
-    const clearStates: Record<string, string[]> = {};
-    for (const n of allNodes) clearStates[n.id] = [];
-    for (const e of allEdges) { if (e.id) clearStates[e.id] = []; }
-    graph.setElementState(clearStates);
+    // 清除上次高亮
+    if (prevHighlightRef.current.length > 0) {
+      const clearStates: Record<string, string[]> = {};
+      for (const id of prevHighlightRef.current) clearStates[id] = [];
+      graph.setElementState(clearStates);
+      prevHighlightRef.current = [];
+    }
 
     if (selectedIds.length === 0) return;
 
     const personMap = buildPersonMap(data.persons);
     const childrenMap = buildChildrenMap(data.persons);
+    const newHighlights: string[] = [];
 
     if (selectedIds.length === 1) {
       const id = selectedIds[0];
       graph.setElementState(id, 'selected');
+      newHighlights.push(id);
+
       const parentId = getParent(id, personMap);
-      if (parentId) graph.setElementState(parentId, 'parent');
-      for (const cid of getChildren(id, childrenMap)) graph.setElementState(cid, 'child');
+      if (parentId) {
+        graph.setElementState(parentId, 'parent');
+        newHighlights.push(parentId);
+      }
+
+      for (const cid of getChildren(id, childrenMap)) {
+        graph.setElementState(cid, 'child');
+        newHighlights.push(cid);
+      }
     } else if (selectedIds.length === 2) {
       const [idA, idB] = selectedIds;
       const path = findShortestPath(idA, idB, personMap);
       const pathSet = new Set(path);
       const stateUpdates: Record<string, string | string[]> = {};
-      for (const pid of path) stateUpdates[pid] = 'path';
-      for (const e of allEdges) {
-        const edgeData = e as any;
-        if (pathSet.has(edgeData.source) && pathSet.has(edgeData.target)) {
-          if (Math.abs(path.indexOf(edgeData.source) - path.indexOf(edgeData.target)) === 1 && e.id) {
-            stateUpdates[e.id] = 'highlight';
-          }
-        }
+
+      for (const pid of path) {
+        stateUpdates[pid] = 'path';
+        newHighlights.push(pid);
       }
+
+      // 只遍历路径上的边，不遍历全部
+      for (let i = 0; i < path.length - 1; i++) {
+        const src = path[i];
+        const tgt = path[i + 1];
+        // G6 边的 id 格式通常是 source-target
+        const edgeId = `${src}-${tgt}`;
+        stateUpdates[edgeId] = 'highlight';
+        newHighlights.push(edgeId);
+      }
+
       graph.setElementState(stateUpdates);
+
       const personA = personMap.get(idA);
       const personB = personMap.get(idB);
-      if (personA && personB) onKinshipResult(calculateKinship(personA, personB, data));
+      if (personA && personB) onKinshipResultRef.current(calculateKinship(personA, personB, data));
     }
+
+    prevHighlightRef.current = newHighlights;
   }, [selectedIds, data]);
 
-  // 年份高亮
+  // 年份高亮——只操作变化节点
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph || currentYear == null || selectedIds.length > 0) return;
 
-    const allNodes = graph.getNodeData();
-    const stateUpdates: Record<string, string[]> = {};
-    for (const n of allNodes) {
-      const personData = (n as any).data as Person | undefined;
-      if (!personData) { stateUpdates[n.id] = []; continue; }
-      const birthYear = personData.birthDate ? new Date(personData.birthDate).getFullYear() : null;
-      const deathYear = personData.deathDate ? new Date(personData.deathDate).getFullYear() : null;
-      const isAlive = birthYear != null && currentYear >= birthYear && (deathYear == null || currentYear <= deathYear);
-      stateUpdates[n.id] = isAlive ? ['path'] : [];
+    // 清除上次年份高亮
+    if (prevYearHighlightRef.current.length > 0) {
+      const clearStates: Record<string, string[]> = {};
+      for (const id of prevYearHighlightRef.current) clearStates[id] = [];
+      graph.setElementState(clearStates);
+      prevYearHighlightRef.current = [];
     }
-    graph.setElementState(stateUpdates);
-  }, [currentYear, data, selectedIds]);
+
+    const stateUpdates: Record<string, string[]> = {};
+    const newHighlights: string[] = [];
+
+    for (const p of data.persons) {
+      const birthYear = getYear(p.birthDate);
+      if (birthYear == null) continue;
+      const deathYear = getYear(p.deathDate);
+      const effectiveDeathYear = deathYear ?? (birthYear + 100);
+      const isAlive = currentYear >= birthYear && currentYear <= effectiveDeathYear;
+      if (isAlive) {
+        stateUpdates[p.id] = ['path'];
+        newHighlights.push(p.id);
+      }
+    }
+
+    if (newHighlights.length > 0) {
+      graph.setElementState(stateUpdates);
+    }
+    prevYearHighlightRef.current = newHighlights;
+  }, [currentYear, selectedIds, data]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

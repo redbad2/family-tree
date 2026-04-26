@@ -16,6 +16,7 @@ import {
   getChildren,
   validateFamilyTreeData,
   getBranchNames,
+  getYear,
 } from './utils/tree';
 import {
   addChildPerson,
@@ -68,8 +69,8 @@ export default function App() {
   }, [treeData]);
 
   const [currentYear, setCurrentYear] = useState<number | null>(null);
-  const [rangeStart, setRangeStart] = useState(1368);
-  const [rangeEnd, setRangeEnd] = useState(1510);
+  const [rangeStart, setRangeStart] = useState<number>(1368);
+  const [rangeEnd, setRangeEnd] = useState<number>(1510);
 
   const personMap = buildPersonMap(treeData.persons);
   const childrenMap = buildChildrenMap(treeData.persons);
@@ -79,18 +80,29 @@ export default function App() {
     let min = 3000;
     let max = 0;
     for (const p of treeData.persons) {
-      if (p.birthDate) {
-        const y = new Date(p.birthDate).getFullYear();
-        if (y < min) min = y;
-        if (y > max) max = y;
+      const birthYear = getYear(p.birthDate);
+      const deathYear = getYear(p.deathDate);
+      if (birthYear != null) {
+        if (birthYear < min) min = birthYear;
+        if (birthYear > max) max = birthYear;
       }
-      if (p.deathDate) {
-        const y = new Date(p.deathDate).getFullYear();
-        if (y > max) max = y;
+      if (deathYear != null && deathYear > max) {
+        max = deathYear;
       }
     }
     return { minYear: min, maxYear: max };
   }, [treeData]);
+
+  // 数据变化时，自动同步时间范围到实际数据的年份范围
+  useEffect(() => {
+    if (minYear <= maxYear) {
+      setRangeStart(minYear);
+      setRangeEnd(maxYear);
+      if (currentYear == null || currentYear < minYear || currentYear > maxYear) {
+        setCurrentYear(minYear);
+      }
+    }
+  }, [minYear, maxYear]);
 
   const selectedPerson = selectedIds.length >= 1 ? personMap.get(selectedIds[0]) ?? null : null;
   const siblingIndex = selectedPerson?.parentId
@@ -332,6 +344,7 @@ export default function App() {
                   persons={treeData.persons}
                   rangeStart={rangeStart}
                   rangeEnd={rangeEnd}
+                  basePersonId={selectedIds[0] ?? null}
                 />
               </>
             )}
