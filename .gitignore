@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 族谱-*
+
+# Claude Code
+.claude/
