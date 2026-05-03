@@ -172,10 +172,9 @@ export default function FamilyTreeGraph({
   const selectedIdsRef = useRef(selectedIds);
   const savedViewportRef = useRef<{
     zoom: number;
-    cameraPos: Point;
-    nodePos: Point | null;
     selectedNodeId: string | undefined;
   } | null>(null);
+  const skipFocusRef = useRef(false);
 
   onNodeSelectRef.current = onNodeSelect;
   onKinshipResultRef.current = onKinshipResult;
@@ -248,26 +247,13 @@ export default function FamilyTreeGraph({
       });
     } else {
       graph.render().then(async () => {
-        const [w, h] = graph.getCanvas().getSize();
-        const cx = w / 2;
-        const cy = h / 2;
-
-        let targetCameraPos = saved.cameraPos;
-        if (saved.selectedNodeId && saved.nodePos && graph.hasNode(saved.selectedNodeId)) {
-          const newNodePos = graph.getElementPosition(saved.selectedNodeId);
-          const deltaX = newNodePos[0] - saved.nodePos[0];
-          const deltaY = newNodePos[1] - saved.nodePos[1];
-          targetCameraPos = [
-            saved.cameraPos[0] + deltaX,
-            saved.cameraPos[1] + deltaY,
-          ];
-        }
-
-        const translateX = (cx - targetCameraPos[0]) * saved.zoom;
-        const translateY = (cy - targetCameraPos[1]) * saved.zoom;
-
         await graph.zoomTo(saved.zoom, false).catch(() => {});
-        await graph.translateTo([translateX, translateY], false).catch(() => {});
+        if (saved.selectedNodeId && graph.hasNode(saved.selectedNodeId)) {
+          skipFocusRef.current = true;
+          try {
+            await graph.focusElement(saved.selectedNodeId, false);
+          } catch {}
+        }
       });
     }
 
@@ -275,16 +261,9 @@ export default function FamilyTreeGraph({
       const g = graphRef.current;
       if (g) {
         try {
-          const selectedNodeId = selectedIdsRef.current[0];
-          let savedNodePos: Point | null = null;
-          if (selectedNodeId) {
-            try { savedNodePos = g.getElementPosition(selectedNodeId); } catch {}
-          }
           savedViewportRef.current = {
             zoom: g.getZoom(),
-            cameraPos: g.getPosition(),
-            nodePos: savedNodePos,
-            selectedNodeId,
+            selectedNodeId: selectedIdsRef.current[0],
           };
         } catch {}
         try { g.destroy(); } catch {}
@@ -294,11 +273,14 @@ export default function FamilyTreeGraph({
     };
   }, [data]);
 
-  // 选中节点变化时聚焦
+  // 选中节点变化时聚焦（但视口恢复期间跳过，避免干扰已恢复的位置）
   useEffect(() => {
     const graph = graphRef.current;
     if (!graph || selectedIds.length === 0) return;
-    // 使用 requestAnimationFrame 替代 setTimeout，更轻量
+    if (skipFocusRef.current) {
+      skipFocusRef.current = false;
+      return;
+    }
     requestAnimationFrame(() => {
       try {
         graph.focusElement(selectedIds[0], false);
