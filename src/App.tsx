@@ -366,6 +366,7 @@ export default function App() {
           currentYear={currentYear ?? minYear}
           rangeStart={rangeStart}
           rangeEnd={rangeEnd}
+          persons={treeData.persons}
           onCurrentYearChange={handleCurrentYearChange}
           onRangeChange={handleRangeChange}
         />

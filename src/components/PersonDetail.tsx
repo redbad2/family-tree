@@ -1,10 +1,11 @@
 import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons';
 import type { Person } from '../types';
-import { calculateLifespan, generationLabel } from '../utils/tree';
+import { calculateLifespan, generationLabel, getYear } from '../utils/tree';
+import { formatYearWithEra } from '../data/history';
 
 interface PersonDetailProps {
   person: Person | null;
@@ -28,6 +29,15 @@ const SPOUSE_TYPE_COLOR: Record<string, string> = {
   '妾': 'orange',
   '其他': 'default',
 };
+
+function formatDateWithEra(dateStr: string | null): string {
+  if (!dateStr) return '';
+  const year = getYear(dateStr);
+  if (year == null) return dateStr;
+  const yearWithEra = formatYearWithEra(year);
+  if (dateStr.length === 4) return yearWithEra;
+  return yearWithEra + dateStr.slice(4);
+}
 
 export default function PersonDetail({
   person,
@@ -119,10 +129,23 @@ export default function PersonDetail({
           </Descriptions.Item>
         )}
         <Descriptions.Item label="出生">
-          {person.birthDate ?? '不详'}
+          {person.birthDate ? (
+            <span>
+              <span style={person.birthDateInferred ? { color: '#999', fontStyle: 'italic' } : undefined}>
+                {formatDateWithEra(person.birthDate)}
+              </span>
+              {person.birthDateInferred && (
+                <Tooltip title="出生年份为算法推断，非原始记录">
+                  <QuestionCircleOutlined style={{ color: '#999', marginLeft: 4, fontSize: 12 }} />
+                </Tooltip>
+              )}
+            </span>
+          ) : (
+            '不详'
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="去世">
-          {person.deathDate ?? '不详'}
+          {person.deathDate ? formatDateWithEra(person.deathDate) : '不详'}
         </Descriptions.Item>
         {lifespan !== null && (
           <Descriptions.Item label="寿命">
@@ -133,8 +156,8 @@ export default function PersonDetail({
           <Descriptions.Item label="配偶">
             {person.spouses.map((s) => {
               const dateParts: string[] = [];
-              if (s.birthDate) dateParts.push(s.birthDate);
-              if (s.deathDate) dateParts.push('—' + s.deathDate);
+              if (s.birthDate) dateParts.push(formatDateWithEra(s.birthDate));
+              if (s.deathDate) dateParts.push('—' + formatDateWithEra(s.deathDate));
               const dateStr = dateParts.length > 0 ? ' · ' + dateParts.join('') : '';
               return (
                 <Tag key={s.id} color={SPOUSE_TYPE_COLOR[s.type] ?? 'default'}>

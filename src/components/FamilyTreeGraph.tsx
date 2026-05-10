@@ -101,6 +101,19 @@ function ensureCustomNodeRegistered() {
       } else {
         this.upsert('migration-badge', Text, false as any, container);
       }
+
+      const birthDateInferred = attributes.birthDateInferred || false;
+      if (birthDateInferred) {
+        this.upsert('inferred-badge', Text, {
+          text: '?',
+          x: -56, y: 16,
+          fontSize: 11, fontWeight: 700,
+          fill: 'rgba(255,255,255,0.5)',
+          textAlign: 'center', textBaseline: 'middle',
+        }, container);
+      } else {
+        this.upsert('inferred-badge', Text, false as any, container);
+      }
     }
   }
 
@@ -145,6 +158,7 @@ function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
         collapsed: isCollapsed,
         needsVerification: isFlagged,
         migrationLocation: person.migrationLocation,
+        birthDateInferred: person.birthDateInferred,
         label: false,
         icon: false,
       },

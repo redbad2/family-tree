@@ -39,6 +39,8 @@ export interface Person {
   needsVerification: boolean;
   /** 迁移地：从原聚集地迁往的地区 */
   migrationLocation: string | null;
+  /** 出生日期是否为推断值 */
+  birthDateInferred?: boolean;
 }
 
 /** 父子关系边 */
