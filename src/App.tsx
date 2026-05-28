@@ -28,7 +28,9 @@ import {
 } from './utils/mutations';
 import { saveToDisk, removeStoredFileHandle } from './utils/fileSystem';
 
-const { Sider, Content } = Layout;
+const { Content } = Layout;
+
+const RIGHT_SIDER_WIDTH = 380;
 
 const STORAGE_KEY = 'family-tree-data';
 
@@ -66,6 +68,10 @@ export default function App() {
   const [leftSiderCollapsed, setLeftSiderCollapsed] = useState(false);
   const [leftSiderWidth, setLeftSiderWidth] = useState(260);
   const leftSiderDragRef = useRef(false);
+  const [rightSiderCollapsed, setRightSiderCollapsed] = useState(true);
+  const handleToggleRightSider = useCallback(() => {
+    setRightSiderCollapsed(prev => !prev);
+  }, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -156,6 +162,7 @@ export default function App() {
       setKinshipResult(null);
     }
     setSiderMode('view');
+    setRightSiderCollapsed(false);
   }, []);
 
   const handleKinshipResult = useCallback((result: KinshipResult | null) => {
@@ -166,6 +173,7 @@ export default function App() {
     setSelectedIds([personId]);
     setKinshipResult(null);
     setSiderMode('view');
+    setRightSiderCollapsed(false);
   }, []);
 
   const handleExport = useCallback(() => {
@@ -420,57 +428,90 @@ export default function App() {
               onKinshipResult={handleKinshipResult}
             />
           </Content>
-          <Sider
-            width={380}
-            theme="light"
+          {/* 右侧收起/展开按钮 */}
+          <div
+            onClick={handleToggleRightSider}
             style={{
-              padding: 16,
-              overflowY: 'auto',
+              width: 20,
+              minWidth: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              background: '#fafafa',
               borderLeft: '1px solid #f0f0f0',
+              transition: 'background 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#f0f0f0';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#fafafa';
             }}
           >
-            {siderMode === 'view' && (
-              <>
-                <PersonDetail
-                  person={selectedPerson}
-                  parentName={parentName}
-                  childrenNames={childrenNames}
-                  siblingIndex={siblingIndex}
-                  siblingCount={siblingCount}
-                  onAddChild={handleAddChild}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  onAddRoot={handleAddRoot}
-                  onMoveUp={handleMoveUp}
-                  onMoveDown={handleMoveDown}
-                  hasSelection={selectedIds.length > 0}
-                />
-                {selectedIds.length >= 2 && (
-                  <KinshipPanel
-                    result={kinshipResult}
-                    personA={personA}
-                    personB={personB}
+            {rightSiderCollapsed ? (
+              <LeftOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+            ) : (
+              <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+            )}
+          </div>
+          {/* 右侧面板 */}
+          <div
+            style={{
+              width: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
+              minWidth: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
+              transition: 'width 0.2s, min-width 0.2s',
+              overflow: 'hidden',
+              borderLeft: rightSiderCollapsed ? 'none' : '1px solid #f0f0f0',
+              background: '#fff',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
+              {siderMode === 'view' && (
+                <>
+                  <PersonDetail
+                    person={selectedPerson}
+                    parentName={parentName}
+                    childrenNames={childrenNames}
+                    siblingIndex={siblingIndex}
+                    siblingCount={siblingCount}
+                    onAddChild={handleAddChild}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onAddRoot={handleAddRoot}
+                    onMoveUp={handleMoveUp}
+                    onMoveDown={handleMoveDown}
+                    hasSelection={selectedIds.length > 0}
                   />
-                )}
-                <StatisticsPanel
-                  persons={treeData.persons}
-                  rangeStart={rangeStart}
-                  rangeEnd={rangeEnd}
-                  basePersonId={selectedIds[0] ?? null}
+                  {selectedIds.length >= 2 && (
+                    <KinshipPanel
+                      result={kinshipResult}
+                      personA={personA}
+                      personB={personB}
+                    />
+                  )}
+                  <StatisticsPanel
+                    persons={treeData.persons}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    basePersonId={selectedIds[0] ?? null}
+                  />
+                </>
+              )}
+              {(siderMode === 'add-child' || siderMode === 'add-root' || siderMode === 'edit') && (
+                <PersonForm
+                  mode={siderMode}
+                  parentPerson={siderMode === 'add-child' ? selectedPerson : null}
+                  person={siderMode === 'edit' ? selectedPerson : null}
+                  existingBranches={branches}
+                  onSubmit={handleFormSubmit}
+                  onCancel={handleFormCancel}
                 />
-              </>
-            )}
-            {(siderMode === 'add-child' || siderMode === 'add-root' || siderMode === 'edit') && (
-              <PersonForm
-                mode={siderMode}
-                parentPerson={siderMode === 'add-child' ? selectedPerson : null}
-                person={siderMode === 'edit' ? selectedPerson : null}
-                existingBranches={branches}
-                onSubmit={handleFormSubmit}
-                onCancel={handleFormCancel}
-              />
-            )}
-          </Sider>
+              )}
+            </div>
+          </div>
         </Layout>
       </Layout>
     </ConfigProvider>
