@@ -22,34 +22,19 @@ interface FamilyTreeGraphProps {
   onKinshipResult: (result: KinshipResult | null) => void;
 }
 
-const BRANCH_PALETTE = [
-  '#c0392b', '#2980b9', '#27ae60', '#e67e22', '#8e44ad',
-  '#16a085', '#d35400', '#2c3e50', '#c2185b', '#00838f',
-  '#6a1b9a', '#ef6c00',
-];
-
-const BRANCH_COLOR_MAP: Record<string, string> = {
-  '东门': '#c0392b',
-  '大东门': '#e67e22',
-  '小东门': '#27ae60',
-  '西门': '#2980b9',
-  '南门': '#8e44ad',
-  '北门': '#16a085',
-  '中门': '#d35400',
-};
-
 const DEFAULT_COLOR = '#7f8c8d';
 const FEMALE_COLOR = '#ad1457';
 const ANIMATION_NODE_THRESHOLD = 200;
 
 function getBranchColor(branch: string | null): string {
   if (!branch) return DEFAULT_COLOR;
-  if (BRANCH_COLOR_MAP[branch]) return BRANCH_COLOR_MAP[branch];
-  let hash = 0;
+  let hash = 0x811c9dc5;
   for (let i = 0; i < branch.length; i++) {
-    hash = ((hash << 5) - hash + branch.charCodeAt(i)) | 0;
+    hash ^= branch.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return BRANCH_PALETTE[Math.abs(hash) % BRANCH_PALETTE.length];
+  const hue = (hash >>> 0) % 340;
+  return `hsl(${hue}, 55%, 50%)`;
 }
 
 let registered = false;
