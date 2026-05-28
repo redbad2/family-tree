@@ -1,12 +1,19 @@
-import { useMemo, useState } from 'react';
-import { Slider, Tag, Space, Tooltip, Button, Statistic, Row, Col } from 'antd';
-import { DownOutlined, UpOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { useMemo, useState, useCallback } from 'react';
+import { Slider, Tag, Space, Tooltip, Button, Statistic, Row, Col, InputNumber } from 'antd';
+import {
+  ClockCircleOutlined,
+  MinusOutlined,
+  PlusOutlined,
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
+} from '@ant-design/icons';
 import {
   DYNASTY_RANGES,
   getEventsInRange,
   getDynastyForYear,
   formatYearWithEra,
   getEraForYear,
+  ERA_RANGES,
 } from '../data/history';
 import {
   getLocalEventsInRange,
@@ -52,7 +59,7 @@ export default function Timeline({
   onCurrentYearChange,
   onRangeChange,
 }: TimelineProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [inputYear, setInputYear] = useState<number>(currentYear);
 
   // 范围内的历史事件（全国）
   const rangeEvents = useMemo(
@@ -77,184 +84,333 @@ export default function Timeline({
     return { total: born.length, male, female };
   }, [persons, rangeStart, rangeEnd]);
 
-  // 时间轴上的标记点（朝代分界线）
-  const marks: Record<number, { label: string; style?: React.CSSProperties }> = useMemo(() => {
-    const m: Record<number, { label: string; style?: React.CSSProperties }> = {};
-    for (const d of DYNASTY_RANGES) {
-      if (d.start >= minYear && d.start <= maxYear) {
-        const era = getEraForYear(d.start);
-        const eraLabel = era ? ` ${era.name}${era.yearInEra}年` : '';
-        m[d.start] = {
-          label: d.name + eraLabel + ' (' + d.start + ')',
-          style: { color: d.color, fontWeight: 600, fontSize: 11 },
-        };
-      }
-    }
-    return m;
-  }, [minYear, maxYear]);
-
   const currentDynasty = getDynastyForYear(currentYear);
+  const currentEra = getEraForYear(currentYear);
+
+  // 快捷跳转
+  const handleJumpYear = useCallback((delta: number) => {
+    const newYear = Math.max(minYear, Math.min(maxYear, currentYear + delta));
+    onCurrentYearChange(newYear);
+    setInputYear(newYear);
+  }, [currentYear, minYear, maxYear, onCurrentYearChange]);
+
+  // 输入框确认
+  const handleInputConfirm = useCallback((value: number | null) => {
+    if (value != null && value >= minYear && value <= maxYear) {
+      onCurrentYearChange(value);
+      setInputYear(value);
+    }
+  }, [minYear, maxYear, onCurrentYearChange]);
+
+  // 点击年号跳转
+  const handleEraClick = useCallback((era: { start: number; end: number }) => {
+    const targetYear = Math.max(era.start, Math.min(era.end, currentYear));
+    onCurrentYearChange(targetYear);
+    setInputYear(targetYear);
+  }, [currentYear, onCurrentYearChange]);
+
+  // 点击事件跳转
+  const handleEventClick = useCallback((year: number) => {
+    onCurrentYearChange(year);
+    setInputYear(year);
+  }, [onCurrentYearChange]);
+
+  // Slider marks - 朝代更替年份
+  const sliderMarks = useMemo(() => {
+    const marks: Record<number, string> = {};
+    DYNASTY_RANGES.forEach((d) => {
+      if (d.start >= minYear && d.start <= maxYear) {
+        marks[d.start] = d.name;
+      }
+      if (d.end >= minYear && d.end <= maxYear) {
+        marks[d.end] = '';
+      }
+    });
+    return marks;
+  }, [minYear, maxYear]);
 
   return (
     <div
       style={{
         background: '#fff',
-        borderTop: '1px solid #f0f0f0',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
       }}
     >
-      {/* 折叠标题栏 */}
+      {/* 年份显示区 */}
       <div
-        onClick={() => setExpanded(!expanded)}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 24px',
-          cursor: 'pointer',
-          userSelect: 'none',
+          padding: '12px 16px 8px',
+          borderBottom: '1px solid #f0f0f0',
         }}
       >
-        <ClockCircleOutlined style={{ color: '#8e44ad' }} />
-        <span style={{ fontSize: 22, fontWeight: 700, color: '#8e44ad' }}>
+        {/* 年份数字 */}
+        <div style={{ fontSize: 32, fontWeight: 700, color: '#8e44ad', lineHeight: 1.1 }}>
           {currentYear}
-        </span>
-        {currentDynasty && (
-          <Tag color="purple" style={{ fontSize: 12, margin: 0 }}>
-            {currentDynasty}
-          </Tag>
-        )}
-        {(() => {
-          const era = getEraForYear(currentYear);
-          if (era) {
-            return (
-              <Tag color="blue" style={{ fontSize: 12, margin: 0 }}>
-                {era.name}{era.yearInEra}年
-              </Tag>
-            );
-          }
-          return null;
-        })()}
-        <span style={{ color: '#999', fontSize: 12, flex: 1 }}>
-          {expanded ? '' : '拖动滑块查看当年存活族人 | 拖动范围选择器查看区间统计'}
-        </span>
-        <Button
-          type="text"
-          size="small"
-          icon={expanded ? <DownOutlined /> : <UpOutlined />}
-          style={{ color: '#999' }}
-        />
+        </div>
+        {/* 年号 */}
+        <div style={{ marginTop: 4 }}>
+          {currentDynasty && (
+            <Tag color="blue" style={{ fontSize: 11, margin: 0 }}>
+              {currentDynasty}
+            </Tag>
+          )}
+          {currentEra && (
+            <Tag color="purple" style={{ fontSize: 11, margin: '2px 0 0 4px' }}>
+              {currentEra.name}{currentEra.yearInEra}年
+            </Tag>
+          )}
+        </div>
       </div>
 
-      {/* 展开内容 */}
-      {expanded && (
-        <div style={{ padding: '0 24px 8px' }}>
-          {/* 年份滑块 */}
+      {/* 年份输入 + 快捷跳转 */}
+      <div
+        style={{
+          padding: '8px 16px',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+          <InputNumber
+            value={inputYear}
+            onChange={(v) => setInputYear(v as number)}
+            onPressEnter={(e) => handleInputConfirm(Number((e.target as HTMLInputElement).value))}
+            onBlur={(e) => handleInputConfirm(Number(e.target.value))}
+            min={minYear}
+            max={maxYear}
+            style={{ width: 80 }}
+            size="small"
+          />
+          <Button
+            type="primary"
+            size="small"
+            onClick={() => handleInputConfirm(inputYear)}
+          >
+            跳转
+          </Button>
+        </div>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          <Button size="small" onClick={() => handleJumpYear(-50)} style={{ flex: 1, minWidth: 50 }}>
+            -50年
+          </Button>
+          <Button size="small" onClick={() => handleJumpYear(-10)} style={{ flex: 1, minWidth: 50 }}>
+            -10年
+          </Button>
+          <Button size="small" onClick={() => handleJumpYear(10)} style={{ flex: 1, minWidth: 50 }}>
+            +10年
+          </Button>
+          <Button size="small" onClick={() => handleJumpYear(50)} style={{ flex: 1, minWidth: 50 }}>
+            +50年
+          </Button>
+        </div>
+      </div>
+
+      {/* 可滚动内容区 */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* 当前年份水平 Slider */}
+        <div style={{ padding: '12px 16px 8px' }}>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+            当前年份
+          </div>
           <Slider
             min={minYear}
             max={maxYear}
             value={currentYear}
-            onChange={(v) => onCurrentYearChange(v as number)}
-            marks={marks}
+            onChange={(v) => {
+              onCurrentYearChange(v as number);
+              setInputYear(v as number);
+            }}
             tooltip={{ formatter: (v) => formatYearWithEra(v as number) }}
+            marks={sliderMarks}
             styles={{
               track: { background: '#8e44ad' },
+              handle: { borderColor: '#8e44ad' },
             }}
           />
-
-          {/* 范围选择 */}
-          <div>
-            <span style={{ fontSize: 12, color: '#666', marginRight: 8 }}>
-              统计范围: {formatYearWithEra(rangeStart)} - {formatYearWithEra(rangeEnd)}
-            </span>
-            <Slider
-              range
-              min={minYear}
-              max={maxYear}
-              value={[rangeStart, rangeEnd]}
-              onChange={(v) => onRangeChange(v[0], v[1])}
-              tooltip={{ formatter: (v) => formatYearWithEra(v as number) }}
-              styles={{
-                track: { background: 'rgba(142,68,173,0.3)' },
-              }}
-            />
-          </div>
-
-          {/* 范围内出生人数统计 */}
-          <div style={{ marginTop: 8, marginBottom: 8 }}>
-            <Row gutter={16}>
-              <Col span={8}>
-                <Statistic
-                  title="范围内出生人数"
-                  value={bornStats.total}
-                  valueStyle={{ color: '#8e44ad', fontSize: 18 }}
-                />
-              </Col>
-              <Col span={8}>
-                <Statistic
-                  title="男"
-                  value={bornStats.male}
-                  valueStyle={{ fontSize: 18 }}
-                />
-              </Col>
-              <Col span={8}>
-                <Statistic
-                  title="女"
-                  value={bornStats.female}
-                  valueStyle={{ fontSize: 18 }}
-                />
-              </Col>
-            </Row>
-          </div>
-
-          {/* 全国历史事件 */}
-          {rangeEvents.length > 0 && (
-            <div style={{ marginTop: 4 }}>
-              <span style={{ fontSize: 12, color: '#999', marginRight: 8 }}>
-                全国范围内历史事件 ({rangeEvents.length}条):
-              </span>
-              <Space size={4} wrap>
-                {rangeEvents.map((e) => (
-                  <Tooltip
-                    key={e.year + '-' + e.title}
-                    title={EVENT_TYPE_LABEL[e.type] || ''}
-                  >
-                    <Tag
-                      color={EVENT_TYPE_COLOR[e.type] || 'default'}
-                      style={{ fontSize: 11, margin: 0 }}
-                    >
-                      {formatYearWithEra(e.year)} {e.title}
-                    </Tag>
-                  </Tooltip>
-                ))}
-              </Space>
-            </div>
-          )}
-
-          {/* 地方历史事件 */}
-          {localRangeEvents.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 12, color: '#999', marginRight: 8 }}>
-                忻州地方历史事件 ({localRangeEvents.length}条):
-              </span>
-              <Space size={4} wrap>
-                {localRangeEvents.map((e) => (
-                  <Tooltip
-                    key={'local-' + e.year + '-' + e.title}
-                    title={e.description || EVENT_TYPE_LABEL[e.type] || ''}
-                  >
-                    <Tag
-                      color={EVENT_TYPE_COLOR[e.type] || 'default'}
-                      style={{ fontSize: 11, margin: 0, borderStyle: 'dashed' }}
-                    >
-                      {formatYearWithEra(e.year)} {e.title}
-                    </Tag>
-                  </Tooltip>
-                ))}
-              </Space>
-            </div>
-          )}
         </div>
-      )}
+
+        {/* 范围选择 */}
+        <div style={{ padding: '0 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>
+            时间范围
+          </div>
+          <div style={{ fontSize: 11, color: '#8e44ad', marginBottom: 4, fontWeight: 500 }}>
+            {formatYearWithEra(rangeStart)} - {formatYearWithEra(rangeEnd)}
+          </div>
+          <Slider
+            range
+            min={minYear}
+            max={maxYear}
+            value={[rangeStart, rangeEnd]}
+            onChange={(v) => onRangeChange(v[0], v[1])}
+            tooltip={{ formatter: (v) => formatYearWithEra(v as number) }}
+            styles={{
+              track: { background: 'rgba(142,68,173,0.3)' },
+            }}
+          />
+        </div>
+
+        {/* 范围内出生人数统计 */}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+            范围内出生 {bornStats.total} 人
+          </div>
+          <Row gutter={8}>
+            <Col span={12}>
+              <Statistic
+                title="男"
+                value={bornStats.male}
+                valueStyle={{ color: '#8e44ad', fontSize: 16 }}
+              />
+            </Col>
+            <Col span={12}>
+              <Statistic
+                title="女"
+                value={bornStats.female}
+                valueStyle={{ color: '#8e44ad', fontSize: 16 }}
+              />
+            </Col>
+          </Row>
+        </div>
+
+        {/* 当前范围内的年号列表 */}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+            年号
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {ERA_RANGES.filter(
+              (era) => era.end >= rangeStart && era.start <= rangeEnd
+            ).map((era) => (
+              <div
+                key={era.name}
+                onClick={() => handleEraClick(era)}
+                style={{
+                  fontSize: 11,
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  background: currentYear >= era.start && currentYear <= era.end ? '#f6e8ff' : 'transparent',
+                  color: currentYear >= era.start && currentYear <= era.end ? '#8e44ad' : '#666',
+                  transition: 'all 0.2s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!(currentYear >= era.start && currentYear <= era.end)) {
+                    e.currentTarget.style.background = '#f5f5f5';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!(currentYear >= era.start && currentYear <= era.end)) {
+                    e.currentTarget.style.background = 'transparent';
+                  }
+                }}
+              >
+                <span style={{ fontWeight: currentYear >= era.start && currentYear <= era.end ? 600 : 400 }}>
+                  {era.name}
+                </span>
+                <span style={{ color: '#999', marginLeft: 4 }}>
+                  {era.start}-{era.end}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 全国历史事件 */}
+        {rangeEvents.length > 0 && (
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+              📌 全国大事 ({rangeEvents.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {rangeEvents.map((e) => (
+                <Tooltip key={e.year + '-' + e.title} title={`[${EVENT_TYPE_LABEL[e.type] || '其他'}] ${e.title}（${formatYearWithEra(e.year)}年）`}>
+                  <div
+                    onClick={() => handleEventClick(e.year)}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      background: currentYear === e.year ? '#e6f7ff' : 'transparent',
+                      color: EVENT_TYPE_COLOR[e.type] || '#666',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = currentYear === (e as any).year ? '#e6f7ff' : 'transparent';
+                    }}
+                  >
+                    <span style={{ fontWeight: 500, minWidth: 36 }}>{formatYearWithEra(e.year)}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.title}
+                    </span>
+                  </div>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 地方历史事件 */}
+        {localRangeEvents.length > 0 && (
+          <div style={{ padding: '8px 16px' }}>
+            <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>
+              📍 忻州大事 ({localRangeEvents.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {localRangeEvents.map((e) => (
+                <Tooltip
+                  key={'local-' + e.year + '-' + e.title}
+                  title={`[${EVENT_TYPE_LABEL[e.type] || '其他'}] ${e.title}（${formatYearWithEra(e.year)}年）${e.description ? ' - ' + e.description : ''}`}
+                >
+                  <div
+                    onClick={() => handleEventClick(e.year)}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      background: currentYear === e.year ? '#fff7e6' : 'transparent',
+                      color: EVENT_TYPE_COLOR[e.type] || '#666',
+                      borderLeft: '2px dashed ' + (EVENT_TYPE_COLOR[e.type] || '#d9d9d9'),
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      transition: 'background 0.2s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f5f5f5';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = currentYear === (e as any).year ? '#fff7e6' : 'transparent';
+                    }}
+                  >
+                    <span style={{ fontWeight: 500, minWidth: 36 }}>{formatYearWithEra(e.year)}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.title}
+                    </span>
+                  </div>
+                </Tooltip>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

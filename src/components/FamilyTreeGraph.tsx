@@ -214,6 +214,7 @@ export default function FamilyTreeGraph({
           parent: { stroke: '#ff6b6b', lineWidth: 3 },
           child: { stroke: '#51cf66', lineWidth: 3 },
           path: { stroke: '#ffd43b', lineWidth: 3, shadowBlur: 6 },
+          alive: { stroke: '#ffd700', lineWidth: 5, shadowBlur: 15, shadowColor: 'rgba(255, 215, 0, 0.7)' },
         },
       },
       edge: {
@@ -367,10 +368,10 @@ export default function FamilyTreeGraph({
     prevHighlightRef.current = newHighlights;
   }, [selectedIds, data]);
 
-  // 年份高亮——只操作变化节点
+  // 年份高亮——存活节点金色高亮
   useEffect(() => {
     const graph = graphRef.current;
-    if (!graph || currentYear == null || selectedIds.length > 0) return;
+    if (!graph || currentYear == null) return;
 
     // 清除上次年份高亮
     if (prevYearHighlightRef.current.length > 0) {
@@ -390,7 +391,7 @@ export default function FamilyTreeGraph({
       const effectiveDeathYear = deathYear ?? (birthYear + 100);
       const isAlive = currentYear >= birthYear && currentYear <= effectiveDeathYear;
       if (isAlive) {
-        stateUpdates[p.id] = ['path'];
+        stateUpdates[p.id] = ['alive'];
         newHighlights.push(p.id);
       }
     }
@@ -399,7 +400,7 @@ export default function FamilyTreeGraph({
       graph.setElementState(stateUpdates);
     }
     prevYearHighlightRef.current = newHighlights;
-  }, [currentYear, selectedIds, data]);
+  }, [currentYear, data]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { ConfigProvider, Layout, theme, message } from 'antd';
+import { ConfigProvider, Layout, theme, message, Button } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import { ClockCircleOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import FamilyTreeGraph from './components/FamilyTreeGraph';
 import PersonDetail from './components/PersonDetail';
 import PersonForm from './components/PersonForm';
@@ -62,6 +63,28 @@ export default function App() {
   const savedDataRef = useRef<string>(JSON.stringify(treeData));
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [savedFileName, setSavedFileName] = useState<string | undefined>(undefined);
+  const [leftSiderCollapsed, setLeftSiderCollapsed] = useState(false);
+  const [leftSiderWidth, setLeftSiderWidth] = useState(260);
+  const leftSiderDragRef = useRef(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!leftSiderDragRef.current) return;
+      const newWidth = Math.max(180, Math.min(500, e.clientX));
+      setLeftSiderWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      leftSiderDragRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     const current = JSON.stringify(treeData);
@@ -139,6 +162,12 @@ export default function App() {
     setKinshipResult(result);
   }, []);
 
+  const handleSearchSelect = useCallback((personId: string) => {
+    setSelectedIds([personId]);
+    setKinshipResult(null);
+    setSiderMode('view');
+  }, []);
+
   const handleExport = useCallback(() => {
     const json = JSON.stringify(treeData, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -182,6 +211,10 @@ export default function App() {
   const handleClearSelection = useCallback(() => {
     setSelectedIds([]);
     setKinshipResult(null);
+  }, []);
+
+  const handleToggleLeftSider = useCallback(() => {
+    setLeftSiderCollapsed(prev => !prev);
   }, []);
 
   const handleZoomIn = useCallback(() => {
@@ -235,7 +268,13 @@ export default function App() {
       return;
     }
     setTreeData(result.data);
-    setSelectedIds([]);
+    // 删除后不清除选中，而是选中其父节点（如果有），保持视图连贯
+    // 与编辑节点保持一致：操作后不重置视图状态
+    if (selectedPerson.parentId) {
+      setSelectedIds([selectedPerson.parentId]);
+    } else {
+      setSelectedIds([]);
+    }
     setSiderMode('view');
     message.success('删除成功');
   }, [selectedPerson, treeData]);
@@ -295,10 +334,83 @@ export default function App() {
           onClearSelection={handleClearSelection}
           onAddRoot={handleAddRoot}
           onSave={handleSave}
+          onSearchSelect={handleSearchSelect}
+          persons={treeData.persons}
           hasUnsavedChanges={hasUnsavedChanges}
           savedFileName={savedFileName}
         />
         <Layout>
+            <div style={{ display: 'flex', height: '100%' }}>
+            {/* 左侧 Sider */}
+            <div
+              style={{
+                width: leftSiderCollapsed ? 0 : leftSiderWidth,
+                minWidth: leftSiderCollapsed ? 0 : leftSiderWidth,
+                transition: leftSiderDragRef.current ? 'none' : 'width 0.2s, min-width 0.2s',
+                overflow: 'hidden',
+                borderRight: leftSiderCollapsed ? 'none' : '1px solid #f0f0f0',
+                background: '#fff',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <Timeline
+                minYear={minYear}
+                maxYear={maxYear}
+                currentYear={currentYear ?? minYear}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                persons={treeData.persons}
+                onCurrentYearChange={handleCurrentYearChange}
+                onRangeChange={handleRangeChange}
+              />
+            </div>
+            {/* 拖拽调整宽度的分隔条 */}
+            {!leftSiderCollapsed && (
+              <div
+                style={{
+                  width: 4,
+                  minWidth: 4,
+                  cursor: 'col-resize',
+                  background: 'transparent',
+                  position: 'relative',
+                  zIndex: 10,
+                }}
+                onMouseDown={() => {
+                  leftSiderDragRef.current = true;
+                  document.body.style.cursor = 'col-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+              />
+            )}
+            {/* 收起/展开按钮 */}
+            <div
+              onClick={handleToggleLeftSider}
+              style={{
+                width: 20,
+                minWidth: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                background: '#fafafa',
+                borderRight: '1px solid #f0f0f0',
+                transition: 'background 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#f0f0f0';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#fafafa';
+              }}
+            >
+              {leftSiderCollapsed ? (
+                <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+              ) : (
+                <LeftOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+              )}
+            </div>
+          </div>
           <Content style={{ position: 'relative', background: '#f5f5f5' }}>
             <FamilyTreeGraph
               data={treeData}
@@ -360,16 +472,6 @@ export default function App() {
             )}
           </Sider>
         </Layout>
-        <Timeline
-          minYear={minYear}
-          maxYear={maxYear}
-          currentYear={currentYear ?? minYear}
-          rangeStart={rangeStart}
-          rangeEnd={rangeEnd}
-          persons={treeData.persons}
-          onCurrentYearChange={handleCurrentYearChange}
-          onRangeChange={handleRangeChange}
-        />
       </Layout>
     </ConfigProvider>
   );

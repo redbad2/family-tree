@@ -1,11 +1,14 @@
-import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip } from 'antd';
+import { useMemo } from 'react';
+import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip, Divider } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
   ArrowUpOutlined, ArrowDownOutlined, QuestionCircleOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import type { Person } from '../types';
 import { calculateLifespan, generationLabel, getYear } from '../utils/tree';
-import { formatYearWithEra } from '../data/history';
+import { formatYearWithEra, getEventsInRange } from '../data/history';
+import { getLocalEventsInRange } from '../data/localHistory';
 
 interface PersonDetailProps {
   person: Person | null;
@@ -193,6 +196,71 @@ export default function PersonDetail({
           </Descriptions.Item>
         )}
       </Descriptions>
+
+      {/* 生平历史事件 */}
+      <LifetimeEvents person={person} />
+    </div>
+  );
+}
+
+function LifetimeEvents({ person }: { person: Person }) {
+  const { nationalEvents, localEvents, startYear, endYear } = useMemo(() => {
+    const by = getYear(person.birthDate);
+    const dy = getYear(person.deathDate);
+    if (by == null) return { nationalEvents: [], localEvents: [], startYear: null, endYear: null };
+    const start = by;
+    const end = dy ?? by + 60;
+    return {
+      nationalEvents: getEventsInRange(start, end),
+      localEvents: getLocalEventsInRange(start, end),
+      startYear: start,
+      endYear: end,
+    };
+  }, [person]);
+
+  if (startYear == null) return null;
+
+  const hasEvents = nationalEvents.length > 0 || localEvents.length > 0;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <Divider style={{ margin: '12px 0' }}>
+        <span style={{ fontSize: 12, color: '#666' }}>
+          <HistoryOutlined style={{ marginRight: 4 }} />
+          生平大事记（{formatYearWithEra(startYear)} ~ {formatYearWithEra(endYear)}）
+        </span>
+      </Divider>
+      {!hasEvents && (
+        <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>暂无记录</div>
+      )}
+      {nationalEvents.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>全国大事</div>
+          <Space size={4} wrap>
+            {nationalEvents.map((e) => (
+              <Tag key={e.year + '-' + e.title} color="default" style={{ fontSize: 11, margin: 0 }}>
+                {formatYearWithEra(e.year)} {e.title}
+              </Tag>
+            ))}
+          </Space>
+        </div>
+      )}
+      {localEvents.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>忻州地方大事</div>
+          <Space size={4} wrap>
+            {localEvents.map((e) => (
+              <Tag
+                key={'local-' + e.year + '-' + e.title}
+                color="default"
+                style={{ fontSize: 11, margin: 0, borderStyle: 'dashed' }}
+              >
+                {formatYearWithEra(e.year)} {e.title}
+              </Tag>
+            ))}
+          </Space>
+        </div>
+      )}
     </div>
   );
 }

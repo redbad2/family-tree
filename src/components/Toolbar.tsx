@@ -1,4 +1,5 @@
-import { Button, Space, Upload, Tooltip, Tag } from 'antd';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { AutoComplete, Button, Space, Tooltip, Tag, Input, Upload } from 'antd';
 import {
   ExportOutlined,
   ImportOutlined,
@@ -8,8 +9,9 @@ import {
   UndoOutlined,
   UserAddOutlined,
   SaveOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
-import type { FamilyTreeData } from '../types';
+import type { FamilyTreeData, Person } from '../types';
 
 interface ToolbarProps {
   onExport: () => void;
@@ -20,6 +22,8 @@ interface ToolbarProps {
   onClearSelection: () => void;
   onAddRoot: () => void;
   onSave: () => void;
+  onSearchSelect: (personId: string) => void;
+  persons: Person[];
   hasUnsavedChanges: boolean;
   savedFileName?: string;
 }
@@ -33,9 +37,69 @@ export default function Toolbar({
   onClearSelection,
   onAddRoot,
   onSave,
+  onSearchSelect,
+  persons,
   hasUnsavedChanges,
   savedFileName,
 }: ToolbarProps) {
+  const [searchText, setSearchText] = useState('');
+  const justSelectedRef = useRef(false);
+
+  // 构建搜索索引：每人 + 每个配偶的名字
+  const searchOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string }>();
+    for (const p of persons) {
+      const key = p.name + '###' + p.id;
+      if (!map.has(key)) {
+        map.set(key, { label: p.name, value: p.id });
+      }
+      for (const s of p.spouses) {
+        const skey = s.name + '###' + p.id;
+        if (!map.has(skey)) {
+          map.set(skey, {
+            label: `${s.name}（${p.name}之配偶）`,
+            value: p.id,
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [persons]);
+
+  // 过滤后的选项
+  const filteredOptions = useMemo(() => {
+    if (!searchText.trim()) return [];
+    const q = searchText.trim();
+    const lowerQ = q.toLowerCase();
+    return searchOptions.filter(
+      (opt) =>
+        opt.label.toLowerCase().includes(lowerQ) ||
+        opt.label.includes(q),
+    ).slice(0, 20);
+  }, [searchText, searchOptions]);
+
+  // 切换族谱数据时清空搜索文本
+  useEffect(() => {
+    setSearchText('');
+  }, [persons]);
+
+  const handleSearchSelect = useCallback(
+    (value: string) => {
+      justSelectedRef.current = true;
+      onSearchSelect(value);
+      setSearchText('');
+    },
+    [onSearchSelect],
+  );
+
+  const handleSearchChange = useCallback((val: string) => {
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false;
+      return;
+    }
+    setSearchText(val);
+  }, []);
+
   const handleImport = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -67,6 +131,23 @@ export default function Toolbar({
             添加始祖
           </Button>
         </Tooltip>
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
+        <AutoComplete
+          value={searchText}
+            onChange={handleSearchChange}
+          onSelect={handleSearchSelect}
+          options={filteredOptions}
+          style={{ width: 240 }}
+          filterOption={false}
+        >
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索姓名（含配偶）..."
+            size="small"
+            allowClear
+            onClear={() => setSearchText('')}
+          />
+        </AutoComplete>
         <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
         <Tooltip title={savedFileName ? `保存到：${savedFileName}` : '首次保存需选择文件位置'}>
           <Button
