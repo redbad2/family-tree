@@ -28,12 +28,23 @@ const BRANCH_PALETTE = [
   '#6a1b9a', '#ef6c00',
 ];
 
+const BRANCH_COLOR_MAP: Record<string, string> = {
+  '东门': '#c0392b',
+  '大东门': '#e67e22',
+  '小东门': '#27ae60',
+  '西门': '#2980b9',
+  '南门': '#8e44ad',
+  '北门': '#16a085',
+  '中门': '#d35400',
+};
+
 const DEFAULT_COLOR = '#7f8c8d';
 const FEMALE_COLOR = '#ad1457';
 const ANIMATION_NODE_THRESHOLD = 200;
 
 function getBranchColor(branch: string | null): string {
   if (!branch) return DEFAULT_COLOR;
+  if (BRANCH_COLOR_MAP[branch]) return BRANCH_COLOR_MAP[branch];
   let hash = 0;
   for (let i = 0; i < branch.length; i++) {
     hash = ((hash << 5) - hash + branch.charCodeAt(i)) | 0;
