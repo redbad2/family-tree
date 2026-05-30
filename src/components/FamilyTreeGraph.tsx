@@ -351,28 +351,39 @@ export default function FamilyTreeGraph({
     const childrenMap = buildChildrenMap(data.persons);
     const newHighlights: string[] = [];
 
-    if (selectedIds.length === 1) {
+    if (selectedIds.length === 1 && !graph.destroyed) {
       const id = selectedIds[0];
-      if (!graph.destroyed) {
-        graph.setElementState(id, 'selected');
-      }
+      const parentId = getParent(id, personMap);
+      const childIds = getChildren(id, childrenMap);
+      const allEdges = graph.getEdgeData();
+
+      graph.setElementState(id, 'selected');
       newHighlights.push(id);
 
-      const parentId = getParent(id, personMap);
       if (parentId) {
-        if (!graph.destroyed) {
-          graph.setElementState(parentId, 'parent');
-        }
+        graph.setElementState(parentId, 'parent');
         newHighlights.push(parentId);
+        const edgeId = allEdges.find(
+          (e) => (e.source === parentId && e.target === id) || (e.source === id && e.target === parentId),
+        )?.id;
+        if (edgeId) {
+          graph.setElementState(edgeId, 'highlight');
+          newHighlights.push(edgeId);
+        }
       }
 
-      for (const cid of getChildren(id, childrenMap)) {
-        if (!graph.destroyed) {
-          graph.setElementState(cid, 'child');
-        }
+      for (const cid of childIds) {
+        graph.setElementState(cid, 'child');
         newHighlights.push(cid);
+        const edgeId = allEdges.find(
+          (e) => (e.source === id && e.target === cid) || (e.source === cid && e.target === id),
+        )?.id;
+        if (edgeId) {
+          graph.setElementState(edgeId, 'highlight');
+          newHighlights.push(edgeId);
+        }
       }
-    } else if (selectedIds.length === 2) {
+    } else if (selectedIds.length === 2 && !graph.destroyed) {
       const [idA, idB] = selectedIds;
       const path = findShortestPath(idA, idB, personMap);
       const stateUpdates: Record<string, string | string[]> = {};
@@ -449,6 +460,7 @@ export default function FamilyTreeGraph({
       clearTimeout(timer);
       timer = window.setTimeout(() => {
         if (graph.destroyed) return;
+        graph.resize(); // 先调整画布尺寸
         graph.fitView().catch(() => {});
       }, 100);
     });
