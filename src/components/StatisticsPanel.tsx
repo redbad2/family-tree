@@ -1,8 +1,44 @@
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef, useEffect, useState } from 'react';
 import { Card, Row, Col, Statistic } from 'antd';
 import * as echarts from 'echarts';
 import type { Person } from '../types';
 import { buildChildrenMap, getDescendants } from '../utils/tree';
+
+function useECharts(containerRef: React.RefObject<HTMLDivElement | null>) {
+  const chartRef = useRef<echarts.ECharts | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    function tryInit() {
+      if (el!.clientWidth > 0 && el!.clientHeight > 0 && !chartRef.current) {
+        chartRef.current = echarts.init(el!);
+        setReady(true);
+        return true;
+      }
+      return false;
+    }
+
+    if (tryInit()) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!tryInit() && chartRef.current) {
+        chartRef.current.resize();
+      }
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+      chartRef.current?.dispose();
+      chartRef.current = null;
+    };
+  }, [containerRef]);
+
+  return { chartRef, ready };
+}
 
 interface StatisticsPanelProps {
   persons: Person[];
@@ -52,14 +88,11 @@ function ageRangeLabel(age: number): string {
 
 function EChartsPie({ data, title, height = 200 }: { data: { name: string; value: number }[]; title: string; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const { chartRef, ready } = useECharts(ref);
 
   useEffect(() => {
-    if (!ref.current) return;
-    if (!chartRef.current) {
-      chartRef.current = echarts.init(ref.current);
-    }
-    chartRef.current.setOption({
+    if (!ready) return;
+    chartRef.current!.setOption({
       title: {
         text: title,
         left: 'center',
@@ -76,22 +109,18 @@ function EChartsPie({ data, title, height = 200 }: { data: { name: string; value
         itemStyle: { borderRadius: 4 },
       }],
     });
-    return () => { chartRef.current?.dispose(); chartRef.current = null; };
-  }, [data, title]);
+  }, [data, title, ready]);
 
   return <div ref={ref} style={{ width: '100%', height }} />;
 }
 
 function EChartsBar({ data, title, height = 200 }: { data: { name: string; value: number }[]; title: string; height?: number }) {
   const ref = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<echarts.ECharts | null>(null);
+  const { chartRef, ready } = useECharts(ref);
 
   useEffect(() => {
-    if (!ref.current) return;
-    if (!chartRef.current) {
-      chartRef.current = echarts.init(ref.current);
-    }
-    chartRef.current.setOption({
+    if (!ready) return;
+    chartRef.current!.setOption({
       title: {
         text: title,
         left: 'center',
@@ -119,8 +148,7 @@ function EChartsBar({ data, title, height = 200 }: { data: { name: string; value
       }],
       grid: { top: 36, bottom: 24, left: 36, right: 12 },
     });
-    return () => { chartRef.current?.dispose(); chartRef.current = null; };
-  }, [data, title]);
+  }, [data, title, ready]);
 
   return <div ref={ref} style={{ width: '100%', height }} />;
 }

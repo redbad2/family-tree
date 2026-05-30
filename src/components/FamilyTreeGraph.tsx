@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Graph, treeToGraphData, register, Rect } from '@antv/g6';
 import type { Point } from '@antv/g6';
 import { Text } from '@antv/g';
@@ -137,6 +137,7 @@ function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
     const isCollapsed = collapsedIds.has(person.id);
     return {
       id: person.id,
+      type: 'family-node',
       data: { ...person, nodeColor },
       style: {
         size: [130, 44],
@@ -185,6 +186,9 @@ export default function FamilyTreeGraph({
     selectedNodeId: string | undefined;
   } | null>(null);
   const skipFocusRef = useRef(false);
+  const graphReadyRef = useRef(false);
+  const generationRef = useRef(0);
+  const [renderVersion, setRenderVersion] = useState(0);
 
   onNodeSelectRef.current = onNodeSelect;
   onKinshipResultRef.current = onKinshipResult;
@@ -192,8 +196,13 @@ export default function FamilyTreeGraph({
 
   // 数据变化：销毁重建图（G6 树图最可靠的方式），但保存缩放和折叠状态
   useEffect(() => {
+    const gen = ++generationRef.current;
     if (!containerRef.current) return;
 
+    graphReadyRef.current = false;
+    if (containerRef.current.childElementCount > 0) {
+      containerRef.current.innerHTML = '';
+    }
     ensureCustomNodeRegistered();
 
     const treeData = transformToTreeData(data, collapsedIdsRef.current);
@@ -234,6 +243,7 @@ export default function FamilyTreeGraph({
           onExpand: (id: string) => collapsedIdsRef.current.delete(id),
         },
       ],
+      autoFit: 'view',
       animation: data.persons.length <= ANIMATION_NODE_THRESHOLD,
       padding: 30,
     });
@@ -252,12 +262,15 @@ export default function FamilyTreeGraph({
     (window as any).__familyTreeGraph = graph;
 
     const saved = savedViewportRef.current;
-    if (!saved) {
-      graph.render().then(() => {
-        graph.fitView().catch(() => {});
-      });
-    } else {
-      graph.render().then(async () => {
+    savedViewportRef.current = null;
+
+    let layoutReady = false;
+
+    const handleLayout = async () => {
+      if (layoutReady) return;
+      layoutReady = true;
+      if (generationRef.current !== gen || graph.destroyed) return;
+      if (saved) {
         await graph.zoomTo(saved.zoom, false).catch(() => {});
         if (saved.selectedNodeId && graph.hasNode(saved.selectedNodeId)) {
           skipFocusRef.current = true;
@@ -265,21 +278,38 @@ export default function FamilyTreeGraph({
             await graph.focusElement(saved.selectedNodeId, false);
           } catch {}
         }
-      });
-    }
+      } else {
+        graph.fitView().catch(() => {});
+      }
+      if (generationRef.current !== gen || graph.destroyed) return;
+      graphReadyRef.current = true;
+      setRenderVersion(v => v + 1);
+    };
+
+    const onAfterLayout = (e: any) => {
+      if (e?.data?.type !== 'post') return;
+      handleLayout();
+    };
+
+    graph.on('afterlayout', onAfterLayout);
+    graph.render().catch(() => {});
 
     return () => {
+      try { graph.off('afterlayout', onAfterLayout); } catch {}
       const g = graphRef.current;
       if (g) {
-        try {
-          savedViewportRef.current = {
-            zoom: g.getZoom(),
-            selectedNodeId: selectedIdsRef.current[0],
-          };
-        } catch {}
+        if (graphReadyRef.current) {
+          try {
+            savedViewportRef.current = {
+              zoom: g.getZoom(),
+              selectedNodeId: selectedIdsRef.current[0],
+            };
+          } catch {}
+        }
         try { g.destroy(); } catch {}
         graphRef.current = null;
       }
+      graphReadyRef.current = false;
       (window as any).__familyTreeGraph = undefined;
     };
   }, [data]);
@@ -287,12 +317,13 @@ export default function FamilyTreeGraph({
   // 选中节点变化时聚焦（但视口恢复期间跳过，避免干扰已恢复的位置）
   useEffect(() => {
     const graph = graphRef.current;
-    if (!graph || selectedIds.length === 0) return;
+    if (!graph || !graphReadyRef.current || selectedIds.length === 0) return;
     if (skipFocusRef.current) {
       skipFocusRef.current = false;
       return;
     }
     requestAnimationFrame(() => {
+      if (graph.destroyed) return;
       try {
         graph.focusElement(selectedIds[0], false);
       } catch {}
@@ -302,13 +333,15 @@ export default function FamilyTreeGraph({
   // 处理选中高亮——只操作相关节点，不遍历全图
   useEffect(() => {
     const graph = graphRef.current;
-    if (!graph) return;
+    if (!graph || !graphReadyRef.current) return;
 
     // 清除上次高亮
     if (prevHighlightRef.current.length > 0) {
-      const clearStates: Record<string, string[]> = {};
-      for (const id of prevHighlightRef.current) clearStates[id] = [];
-      graph.setElementState(clearStates);
+      if (!graph.destroyed) {
+        const clearStates: Record<string, string[]> = {};
+        for (const id of prevHighlightRef.current) clearStates[id] = [];
+        graph.setElementState(clearStates);
+      }
       prevHighlightRef.current = [];
     }
 
@@ -320,23 +353,28 @@ export default function FamilyTreeGraph({
 
     if (selectedIds.length === 1) {
       const id = selectedIds[0];
-      graph.setElementState(id, 'selected');
+      if (!graph.destroyed) {
+        graph.setElementState(id, 'selected');
+      }
       newHighlights.push(id);
 
       const parentId = getParent(id, personMap);
       if (parentId) {
-        graph.setElementState(parentId, 'parent');
+        if (!graph.destroyed) {
+          graph.setElementState(parentId, 'parent');
+        }
         newHighlights.push(parentId);
       }
 
       for (const cid of getChildren(id, childrenMap)) {
-        graph.setElementState(cid, 'child');
+        if (!graph.destroyed) {
+          graph.setElementState(cid, 'child');
+        }
         newHighlights.push(cid);
       }
     } else if (selectedIds.length === 2) {
       const [idA, idB] = selectedIds;
       const path = findShortestPath(idA, idB, personMap);
-      const pathSet = new Set(path);
       const stateUpdates: Record<string, string | string[]> = {};
 
       for (const pid of path) {
@@ -344,17 +382,17 @@ export default function FamilyTreeGraph({
         newHighlights.push(pid);
       }
 
-      // 只遍历路径上的边，不遍历全部
       for (let i = 0; i < path.length - 1; i++) {
         const src = path[i];
         const tgt = path[i + 1];
-        // G6 边的 id 格式通常是 source-target
         const edgeId = `${src}-${tgt}`;
         stateUpdates[edgeId] = 'highlight';
         newHighlights.push(edgeId);
       }
 
-      graph.setElementState(stateUpdates);
+      if (!graph.destroyed) {
+        graph.setElementState(stateUpdates);
+      }
 
       const personA = personMap.get(idA);
       const personB = personMap.get(idB);
@@ -362,18 +400,20 @@ export default function FamilyTreeGraph({
     }
 
     prevHighlightRef.current = newHighlights;
-  }, [selectedIds, data]);
+  }, [selectedIds, renderVersion]);
 
   // 年份高亮——存活节点金色高亮
   useEffect(() => {
     const graph = graphRef.current;
-    if (!graph || currentYear == null) return;
+    if (!graph || !graphReadyRef.current || currentYear == null) return;
 
     // 清除上次年份高亮
     if (prevYearHighlightRef.current.length > 0) {
-      const clearStates: Record<string, string[]> = {};
-      for (const id of prevYearHighlightRef.current) clearStates[id] = [];
-      graph.setElementState(clearStates);
+      if (!graph.destroyed) {
+        const clearStates: Record<string, string[]> = {};
+        for (const id of prevYearHighlightRef.current) clearStates[id] = [];
+        graph.setElementState(clearStates);
+      }
       prevYearHighlightRef.current = [];
     }
 
@@ -392,13 +432,34 @@ export default function FamilyTreeGraph({
       }
     }
 
-    if (newHighlights.length > 0) {
+    if (newHighlights.length > 0 && !graph.destroyed) {
       graph.setElementState(stateUpdates);
     }
     prevYearHighlightRef.current = newHighlights;
-  }, [currentYear, data]);
+  }, [currentYear, renderVersion]);
+
+  // 容器尺寸变化时重新适配视口（左侧栏/右侧栏展开收起时）
+  useEffect(() => {
+    const graph = graphRef.current;
+    const container = containerRef.current;
+    if (!graph || !container || !graphReadyRef.current) return;
+
+    let timer: number;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (graph.destroyed) return;
+        graph.fitView().catch(() => {});
+      }, 100);
+    });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+    };
+  }, [renderVersion]);
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />
   );
 }

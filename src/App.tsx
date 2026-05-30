@@ -347,7 +347,7 @@ export default function App() {
           hasUnsavedChanges={hasUnsavedChanges}
           savedFileName={savedFileName}
         />
-        <Layout>
+        <Layout hasSider style={{ flexDirection: 'row' }}>
             <div style={{ display: 'flex', height: '100%' }}>
             {/* 左侧 Sider */}
             <div
