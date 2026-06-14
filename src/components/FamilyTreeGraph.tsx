@@ -264,11 +264,11 @@ export default function FamilyTreeGraph({
     const saved = savedViewportRef.current;
     savedViewportRef.current = null;
 
-    let layoutReady = false;
-
-    const handleLayout = async () => {
-      if (layoutReady) return;
-      layoutReady = true;
+    // 注意：compact-box 属于 preLayout 类型布局，G6 在 render() 中走 preLayoutDraw 分支，
+    // 只会发出 afterlayout 的 'pre' 事件，永远不会发出 'post' 事件。
+    // 因此不能依赖 afterlayout('post') 来判断图就绪，必须 await graph.render() 完成本身。
+    // render() 内部已完成 preLayout（布局）+ createElements/updateElements（绘制）+ autoFit。
+    graph.render().then(async () => {
       if (generationRef.current !== gen || graph.destroyed) return;
       if (saved) {
         await graph.zoomTo(saved.zoom, false).catch(() => {});
@@ -284,18 +284,9 @@ export default function FamilyTreeGraph({
       if (generationRef.current !== gen || graph.destroyed) return;
       graphReadyRef.current = true;
       setRenderVersion(v => v + 1);
-    };
-
-    const onAfterLayout = (e: any) => {
-      if (e?.data?.type !== 'post') return;
-      handleLayout();
-    };
-
-    graph.on('afterlayout', onAfterLayout);
-    graph.render().catch(() => {});
+    }).catch(() => {});
 
     return () => {
-      try { graph.off('afterlayout', onAfterLayout); } catch {}
       const g = graphRef.current;
       if (g) {
         if (graphReadyRef.current) {
@@ -448,28 +439,6 @@ export default function FamilyTreeGraph({
     }
     prevYearHighlightRef.current = newHighlights;
   }, [currentYear, renderVersion]);
-
-  // 容器尺寸变化时重新适配视口（左侧栏/右侧栏展开收起时）
-  useEffect(() => {
-    const graph = graphRef.current;
-    const container = containerRef.current;
-    if (!graph || !container || !graphReadyRef.current) return;
-
-    let timer: number;
-    const observer = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        if (graph.destroyed) return;
-        graph.resize(); // 先调整画布尺寸
-        graph.fitView().catch(() => {});
-      }, 100);
-    });
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-      clearTimeout(timer);
-    };
-  }, [renderVersion]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />
