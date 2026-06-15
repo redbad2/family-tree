@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import {
   Form,
   Input,
+  InputNumber,
   Radio,
   Select,
   Button,
@@ -11,7 +12,7 @@ import {
 } from 'antd';
 import { PlusOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import { Checkbox } from 'antd';
-import type { Person, Spouse, Gender, SiderMode } from '../types';
+import type { Person, Spouse, Gender, SiderMode, PersonalEventType } from '../types';
 import { generateSpouseId } from '../utils/mutations';
 import { generationLabel } from '../utils/tree';
 
@@ -21,6 +22,16 @@ const DATE_VALIDATOR = (_: any, value: string) => {
   if (DATE_PATTERN.test(value.trim())) return Promise.resolve();
   return Promise.reject(new Error('格式：YYYY 或 YYYY-MM 或 YYYY-MM-DD'));
 };
+
+const PERSONAL_EVENT_TYPES: { value: PersonalEventType; label: string }[] = [
+  { value: 'birth', label: '出生' },
+  { value: 'marriage', label: '婚配' },
+  { value: 'child', label: '生育' },
+  { value: 'migration', label: '迁徙' },
+  { value: 'achievement', label: '功名' },
+  { value: 'death', label: '去世' },
+  { value: 'other', label: '其他' },
+];
 
 interface PersonFormProps {
   mode: SiderMode;
@@ -70,6 +81,7 @@ export default function PersonForm({
         needsVerification: person.needsVerification,
         migrationLocation: person.migrationLocation ?? '',
         spouses: person.spouses.map((s) => ({ name: s.name, type: s.type, birthDate: s.birthDate ?? '', deathDate: s.deathDate ?? '' })),
+        personalEvents: (person.personalEvents ?? []).map((e) => ({ year: e.year, title: e.title, type: e.type, note: e.note ?? '' })),
       });
     } else if (mode === 'add-child' && parentPerson) {
       form.setFieldsValue({
@@ -84,6 +96,7 @@ export default function PersonForm({
         needsVerification: false,
         migrationLocation: '',
         spouses: [],
+        personalEvents: [],
       });
     } else if (mode === 'add-root') {
       form.setFieldsValue({
@@ -98,6 +111,7 @@ export default function PersonForm({
         needsVerification: false,
         migrationLocation: '',
         spouses: [],
+        personalEvents: [],
       });
     }
   }, [mode, person, parentPerson, form]);
@@ -125,6 +139,14 @@ export default function PersonForm({
       needsVerification: !!values.needsVerification,
       migrationLocation: values.migrationLocation?.trim() || null,
       spouses,
+      personalEvents: (values.personalEvents || [])
+        .filter((e: any) => e.year != null && e.title?.trim())
+        .map((e: any) => ({
+          year: e.year,
+          title: e.title.trim(),
+          type: e.type as PersonalEventType,
+          note: e.note?.trim() || undefined,
+        })),
     });
   };
 
@@ -271,6 +293,65 @@ export default function PersonForm({
                 style={{ marginBottom: 12 }}
               >
                 添加配偶
+              </Button>
+            </>
+          )}
+        </Form.List>
+
+        <Divider orientation="left" style={{ fontSize: 13, margin: '8px 0 12px' }}>
+          生平事件
+        </Divider>
+
+        <Form.List name="personalEvents">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <Space key={key} style={{ display: 'flex', marginBottom: 4, flexWrap: 'wrap' }} align="baseline">
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'year']}
+                    rules={[{ required: true, message: '年份' }]}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber placeholder="年份" style={{ width: 80 }} min={0} max={2100} />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'title']}
+                    rules={[{ required: true, message: '事件' }]}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Input placeholder="事件描述" style={{ width: 120 }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'type']}
+                    initialValue="other"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Select options={PERSONAL_EVENT_TYPES} style={{ width: 72 }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'note']}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Input placeholder="备注" style={{ width: 80 }} />
+                  </Form.Item>
+                  <MinusCircleOutlined
+                    onClick={() => remove(name)}
+                    style={{ color: '#ff4d4f' }}
+                  />
+                </Space>
+              ))}
+              <Button
+                type="dashed"
+                onClick={() => add()}
+                block
+                icon={<PlusOutlined />}
+                style={{ marginBottom: 12 }}
+              >
+                添加生平事件
               </Button>
             </>
           )}

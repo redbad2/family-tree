@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { Person, FamilyTreeData, Spouse, Gender } from '../types';
+import type { Person, FamilyTreeData, Spouse, Gender, PersonalEvent } from '../types';
 import { buildChildrenMap } from './tree';
 
 /** 生成唯一人物 ID */
@@ -26,6 +26,7 @@ export function addChildPerson(
     education?: string | null;
     deeds?: string | null;
     migrationLocation?: string | null;
+    personalEvents?: PersonalEvent[];
   },
 ): FamilyTreeData {
   const parent = data.persons.find((p) => p.id === parentId);
@@ -46,6 +47,7 @@ export function addChildPerson(
     parentId,
     needsVerification: false,
     migrationLocation: fields.migrationLocation ?? null,
+    personalEvents: fields.personalEvents,
   };
 
   return {
@@ -69,6 +71,7 @@ export function addRootPerson(
     education?: string | null;
     deeds?: string | null;
     migrationLocation?: string | null;
+    personalEvents?: PersonalEvent[];
   },
 ): FamilyTreeData {
   const id = generatePersonId();
@@ -86,6 +89,7 @@ export function addRootPerson(
     parentId: null,
     needsVerification: false,
     migrationLocation: fields.migrationLocation ?? null,
+    personalEvents: fields.personalEvents,
   };
 
   return {

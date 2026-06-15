@@ -9,6 +9,7 @@ import KinshipPanel from './components/KinshipPanel';
 import Toolbar from './components/Toolbar';
 import Timeline from './components/Timeline';
 import StatisticsPanel from './components/StatisticsPanel';
+import LineageExportModal from './components/LineageExportModal';
 import { sampleFamilyTree } from './data/sample';
 import type { FamilyTreeData, KinshipResult, SiderMode } from './types';
 import {
@@ -56,11 +57,13 @@ function getGraphInstance() {
 
 export default function App() {
   const [treeData, setTreeData] = useState<FamilyTreeData>(() => {
-    return sampleFamilyTree;
+    // 优先从 localStorage 恢复，避免刷新丢失数据；无则回退到示例数据
+    return loadFromStorage() ?? sampleFamilyTree;
   });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [kinshipResult, setKinshipResult] = useState<KinshipResult | null>(null);
   const [siderMode, setSiderMode] = useState<SiderMode>('view');
+  const [ancestorPathId, setAncestorPathId] = useState<string | null>(null);
 
   const savedDataRef = useRef<string>(JSON.stringify(treeData));
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -69,6 +72,7 @@ export default function App() {
   const [leftSiderWidth, setLeftSiderWidth] = useState(260);
   const leftSiderDragRef = useRef(false);
   const [rightSiderCollapsed, setRightSiderCollapsed] = useState(true);
+  const [lineageExportOpen, setLineageExportOpen] = useState(false);
   const handleToggleRightSider = useCallback(() => {
     setRightSiderCollapsed(prev => !prev);
   }, []);
@@ -95,6 +99,12 @@ export default function App() {
   useEffect(() => {
     const current = JSON.stringify(treeData);
     setHasUnsavedChanges(current !== savedDataRef.current);
+  }, [treeData]);
+
+  // 防抖自动保存到 localStorage，刷新不丢失
+  useEffect(() => {
+    const t = setTimeout(() => saveToStorage(treeData), 800);
+    return () => clearTimeout(t);
   }, [treeData]);
 
   const [currentYear, setCurrentYear] = useState<number | null>(null);
@@ -161,12 +171,18 @@ export default function App() {
       setSelectedIds([id]);
       setKinshipResult(null);
     }
+    setAncestorPathId(null); // 用户点别的节点时清除祖先路径
     setSiderMode('view');
     setRightSiderCollapsed(false);
   }, []);
 
   const handleKinshipResult = useCallback((result: KinshipResult | null) => {
     setKinshipResult(result);
+  }, []);
+
+  const handleTraceAncestors = useCallback((personId: string) => {
+    setAncestorPathId(personId);
+    setSelectedIds([personId]);
   }, []);
 
   const handleSearchSelect = useCallback((personId: string) => {
@@ -193,6 +209,7 @@ export default function App() {
       savedDataRef.current = JSON.stringify(treeData);
       setHasUnsavedChanges(false);
       if (result.fileName) setSavedFileName(result.fileName);
+      saveToStorage(treeData); // 同步到 localStorage
       message.success(result.message);
     } else {
       message.warning(result.message);
@@ -343,6 +360,7 @@ export default function App() {
           onAddRoot={handleAddRoot}
           onSave={handleSave}
           onSearchSelect={handleSearchSelect}
+          onExportLineage={() => setLineageExportOpen(true)}
           persons={treeData.persons}
           hasUnsavedChanges={hasUnsavedChanges}
           savedFileName={savedFileName}
@@ -424,6 +442,7 @@ export default function App() {
               data={treeData}
               selectedIds={selectedIds}
               currentYear={currentYear}
+              ancestorPathId={ancestorPathId}
               onNodeSelect={handleNodeSelect}
               onKinshipResult={handleKinshipResult}
             />
@@ -484,6 +503,7 @@ export default function App() {
                     onMoveUp={handleMoveUp}
                     onMoveDown={handleMoveDown}
                     hasSelection={selectedIds.length > 0}
+                    onTraceAncestors={handleTraceAncestors}
                   />
                   {selectedIds.length >= 2 && (
                     <KinshipPanel
@@ -514,6 +534,11 @@ export default function App() {
           </div>
         </Layout>
       </Layout>
+      <LineageExportModal
+        open={lineageExportOpen}
+        onClose={() => setLineageExportOpen(false)}
+        data={treeData}
+      />
     </ConfigProvider>
   );
 }

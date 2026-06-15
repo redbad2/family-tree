@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
-import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip, Divider } from 'antd';
+import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip, Divider, Timeline } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
   ArrowUpOutlined, ArrowDownOutlined, QuestionCircleOutlined,
-  HistoryOutlined,
+  HistoryOutlined, AimOutlined,
 } from '@ant-design/icons';
-import type { Person } from '../types';
+import type { Person, PersonalEvent } from '../types';
 import { calculateLifespan, generationLabel, getYear } from '../utils/tree';
 import { formatYearWithEra, getEventsInRange } from '../data/history';
 import { getLocalEventsInRange } from '../data/localHistory';
@@ -23,6 +23,7 @@ interface PersonDetailProps {
   onMoveUp: () => void;
   onMoveDown: () => void;
   hasSelection: boolean;
+  onTraceAncestors: (personId: string) => void;
 }
 
 const SPOUSE_TYPE_COLOR: Record<string, string> = {
@@ -55,6 +56,7 @@ export default function PersonDetail({
   onMoveUp,
   onMoveDown,
   hasSelection,
+  onTraceAncestors,
 }: PersonDetailProps) {
   if (!person) {
     return (
@@ -93,6 +95,12 @@ export default function PersonDetail({
             删除
           </Button>
         </Popconfirm>
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px', alignSelf: 'center' }} />
+        <Tooltip title="高亮从该人到始祖的直系祖先链">
+          <Button size="small" icon={<AimOutlined />} onClick={() => onTraceAncestors(person.id)}>
+            寻根溯源
+          </Button>
+        </Tooltip>
         {person.parentId && (
           <>
             <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px', alignSelf: 'center' }} />
@@ -203,63 +211,137 @@ export default function PersonDetail({
   );
 }
 
+/** 个人事件类型 → Timeline 颜色 + 标签 */
+const PERSONAL_EVENT_STYLE: Record<string, { color: string; label: string }> = {
+  birth: { color: 'green', label: '出生' },
+  marriage: { color: 'magenta', label: '婚配' },
+  child: { color: 'blue', label: '生育' },
+  migration: { color: 'cyan', label: '迁徙' },
+  achievement: { color: 'gold', label: '功名' },
+  death: { color: 'gray', label: '去世' },
+  other: { color: 'default', label: '其他' },
+};
+
+interface TimelineEntry {
+  year: number;
+  /** 个人事件（有则为个人条目），无则为历史背景条目 */
+  personal?: { title: string; type: string; note?: string };
+  national?: { title: string; type: string };
+  local?: { title: string; location?: string };
+}
+
 function LifetimeEvents({ person }: { person: Person }) {
-  const { nationalEvents, localEvents, startYear, endYear } = useMemo(() => {
+  const { entries, startYear, endYear } = useMemo(() => {
     const by = getYear(person.birthDate);
     const dy = getYear(person.deathDate);
-    if (by == null) return { nationalEvents: [], localEvents: [], startYear: null, endYear: null };
+    if (by == null) return { entries: [] as TimelineEntry[], startYear: null, endYear: null };
+
     const start = by;
     const end = dy ?? by + 60;
-    return {
-      nationalEvents: getEventsInRange(start, end),
-      localEvents: getLocalEventsInRange(start, end),
-      startYear: start,
-      endYear: end,
-    };
+    const nationalEvents = getEventsInRange(start, end);
+    const localEvents = getLocalEventsInRange(start, end);
+
+    // 合并三源事件到统一时间线
+    const allEntries: TimelineEntry[] = [];
+
+    // ① 自动推导的出生事件
+    allEntries.push({ year: by, personal: { title: '出生', type: 'birth' } });
+
+    // ② 自动推导的去世事件
+    if (dy != null) {
+      allEntries.push({ year: dy, personal: { title: '去世', type: 'death' } });
+    }
+
+    // ③ 用户录入的 personalEvents
+    if (person.personalEvents?.length) {
+      for (const pe of person.personalEvents) {
+        // 跳过已自动推导的出生/去世事件（避免重复）
+        if (pe.type === 'birth' && pe.year === by) continue;
+        if (pe.type === 'death' && pe.year === dy) continue;
+        allEntries.push({ year: pe.year, personal: { title: pe.title, type: pe.type, note: pe.note } });
+      }
+    }
+
+    // ④ 全国历史事件
+    for (const e of nationalEvents) {
+      allEntries.push({ year: e.year, national: { title: e.title, type: e.type } });
+    }
+
+    // ⑤ 地方历史事件
+    for (const e of localEvents) {
+      allEntries.push({ year: e.year, local: { title: e.title, location: e.location } });
+    }
+
+    // 按年份升序排序
+    allEntries.sort((a, b) => a.year - b.year);
+
+    return { entries: allEntries, startYear: start, endYear: end };
   }, [person]);
 
   if (startYear == null) return null;
-
-  const hasEvents = nationalEvents.length > 0 || localEvents.length > 0;
 
   return (
     <div style={{ marginTop: 12 }}>
       <Divider style={{ margin: '12px 0' }}>
         <span style={{ fontSize: 12, color: '#666' }}>
           <HistoryOutlined style={{ marginRight: 4 }} />
-          生平大事记（{formatYearWithEra(startYear)} ~ {formatYearWithEra(endYear)}）
+          生平时间线（{formatYearWithEra(startYear)} ~ {formatYearWithEra(endYear!)}）
         </span>
       </Divider>
-      {!hasEvents && (
+      {entries.length === 0 ? (
         <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>暂无记录</div>
-      )}
-      {nationalEvents.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>全国大事</div>
-          <Space size={4} wrap>
-            {nationalEvents.map((e) => (
-              <Tag key={e.year + '-' + e.title} color="default" style={{ fontSize: 11, margin: 0 }}>
-                {formatYearWithEra(e.year)} {e.title}
-              </Tag>
-            ))}
-          </Space>
-        </div>
-      )}
-      {localEvents.length > 0 && (
-        <div>
-          <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>忻州地方大事</div>
-          <Space size={4} wrap>
-            {localEvents.map((e) => (
-              <Tag
-                key={'local-' + e.year + '-' + e.title}
-                color="default"
-                style={{ fontSize: 11, margin: 0, borderStyle: 'dashed' }}
-              >
-                {formatYearWithEra(e.year)} {e.title}
-              </Tag>
-            ))}
-          </Space>
-        </div>
+      ) : (
+        <Timeline
+          mode="left"
+          style={{ paddingTop: 4, paddingBottom: 0 }}
+          items={entries.map((entry, idx) => {
+            const age = entry.year - startYear;
+            const ageStr = age > 0 ? `${age}岁` : '';
+
+            if (entry.personal) {
+              // 个人生平事件 —— 实色圆点
+              const style = PERSONAL_EVENT_STYLE[entry.personal.type] ?? PERSONAL_EVENT_STYLE.other;
+              return {
+                key: `p-${idx}`,
+                color: style.color,
+                children: (
+                  <div style={{ fontSize: 12 }}>
+                    <span style={{ color: '#666', marginRight: 8 }}>
+                      {formatYearWithEra(entry.year)}{ageStr ? ` (${ageStr})` : ''}
+                    </span>
+                    <Tag color={style.color} style={{ fontSize: 11, margin: 0 }}>{style.label}</Tag>
+                    {' '}{entry.personal.title}
+                    {entry.personal.note && (
+                      <span style={{ color: '#999', marginLeft: 4 }}>- {entry.personal.note}</span>
+                    )}
+                  </div>
+                ),
+              };
+            }
+
+            // 历史背景事件 —— 空心灰点
+            const isLocal = !!entry.local;
+            const title = entry.national?.title ?? entry.local?.title ?? '';
+            const locTag = entry.local?.location ? (
+              <Tag color="cyan" style={{ fontSize: 10, margin: 0, lineHeight: '16px' }}>{entry.local.location}</Tag>
+            ) : null;
+
+            return {
+              key: `h-${idx}`,
+              dot: <div style={{
+                width: 8, height: 8, borderRadius: '50%',
+                border: '1.5px solid #bbb', background: '#fff',
+                marginLeft: 2, marginTop: 4,
+              }} />,
+              children: (
+                <div style={{ fontSize: 11, color: '#999' }}>
+                  <span style={{ marginRight: 6 }}>{formatYearWithEra(entry.year)}</span>
+                  {locTag}{' '}{title}
+                </div>
+              ),
+            };
+          })}
+        />
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import {
   UserAddOutlined,
   SaveOutlined,
   SearchOutlined,
+  TableOutlined,
 } from '@ant-design/icons';
 import type { FamilyTreeData, Person } from '../types';
 
@@ -23,6 +24,7 @@ interface ToolbarProps {
   onAddRoot: () => void;
   onSave: () => void;
   onSearchSelect: (personId: string) => void;
+  onExportLineage: () => void;
   persons: Person[];
   hasUnsavedChanges: boolean;
   savedFileName?: string;
@@ -38,6 +40,7 @@ export default function Toolbar({
   onAddRoot,
   onSave,
   onSearchSelect,
+  onExportLineage,
   persons,
   hasUnsavedChanges,
   savedFileName,
@@ -179,6 +182,11 @@ export default function Toolbar({
         <Tooltip title="导出 JSON">
           <Button icon={<ExportOutlined />} size="small" onClick={onExport}>
             导出
+          </Button>
+        </Tooltip>
+        <Tooltip title="导出欧式/苏式世系表（PDF/文本）">
+          <Button icon={<TableOutlined />} size="small" onClick={onExportLineage}>
+            世系表
           </Button>
         </Tooltip>
         <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />

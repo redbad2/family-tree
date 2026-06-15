@@ -8,6 +8,7 @@ import {
   buildPersonMap,
   buildChildrenMap,
   findShortestPath,
+  getAncestors,
   getParent,
   getChildren,
   getYear,
@@ -18,6 +19,8 @@ interface FamilyTreeGraphProps {
   data: FamilyTreeData;
   selectedIds: string[];
   currentYear: number | null;
+  /** 祖先路径回溯的起始节点 ID，设置后高亮该节点到始祖的直系祖先链 */
+  ancestorPathId: string | null;
   onNodeSelect: (id: string, multi: boolean) => void;
   onKinshipResult: (result: KinshipResult | null) => void;
 }
@@ -170,6 +173,7 @@ export default function FamilyTreeGraph({
   data,
   selectedIds,
   currentYear,
+  ancestorPathId,
   onNodeSelect,
   onKinshipResult,
 }: FamilyTreeGraphProps) {
@@ -178,6 +182,7 @@ export default function FamilyTreeGraph({
   const collapsedIdsRef = useRef<Set<string>>(new Set());
   const prevHighlightRef = useRef<string[]>([]);
   const prevYearHighlightRef = useRef<string[]>([]);
+  const prevAncestorHighlightRef = useRef<string[]>([]);
   const onNodeSelectRef = useRef(onNodeSelect);
   const onKinshipResultRef = useRef(onKinshipResult);
   const selectedIdsRef = useRef(selectedIds);
@@ -220,6 +225,7 @@ export default function FamilyTreeGraph({
           child: { stroke: '#51cf66', lineWidth: 3 },
           path: { stroke: '#ffd43b', lineWidth: 3, shadowBlur: 6 },
           alive: { stroke: '#ffd700', lineWidth: 5, shadowBlur: 15, shadowColor: 'rgba(255, 215, 0, 0.7)' },
+          ancestor: { stroke: '#9b59b6', lineWidth: 3, shadowBlur: 6 },
         },
       },
       edge: {
@@ -439,6 +445,60 @@ export default function FamilyTreeGraph({
     }
     prevYearHighlightRef.current = newHighlights;
   }, [currentYear, renderVersion]);
+
+  // 祖先路径高亮——从选中节点到始祖的直系祖先链
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph || !graphReadyRef.current || graph.destroyed) return;
+
+    // 清除上次祖先高亮
+    if (prevAncestorHighlightRef.current.length > 0) {
+      const clearStates: Record<string, string[]> = {};
+      for (const id of prevAncestorHighlightRef.current) clearStates[id] = [];
+      graph.setElementState(clearStates);
+      prevAncestorHighlightRef.current = [];
+    }
+
+    if (!ancestorPathId) return;
+
+    const personMap = buildPersonMap(data.persons);
+    const ancestorIds = getAncestors(ancestorPathId, personMap);
+    const chainIds = [ancestorPathId, ...ancestorIds]; // 从自己到始祖
+
+    const stateUpdates: Record<string, string[]> = {};
+    const newHighlights: string[] = [];
+
+    for (const id of chainIds) {
+      stateUpdates[id] = ['ancestor'];
+      newHighlights.push(id);
+    }
+
+    // 高亮祖先链上的边
+    const childrenMap = buildChildrenMap(data.persons);
+    for (let i = 0; i < chainIds.length; i++) {
+      const childId = chainIds[i];
+      const parentId = i + 1 < chainIds.length ? chainIds[i + 1] : null;
+      if (!parentId) continue;
+      // 查找连接父子节点的边
+      try {
+        const edges = graph.getEdgeData() as Array<{ id: string; source: string | { id: string }; target: string | { id: string } }>;
+        for (const edge of edges) {
+          const src = typeof edge.source === 'string' ? edge.source : edge.source?.id;
+          const tgt = typeof edge.target === 'string' ? edge.target : edge.target?.id;
+          if ((src === parentId && tgt === childId) || (src === childId && tgt === parentId)) {
+            stateUpdates[edge.id] = ['highlight'];
+            newHighlights.push(edge.id);
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (newHighlights.length > 0) {
+      graph.setElementState(stateUpdates);
+    }
+    prevAncestorHighlightRef.current = newHighlights;
+  }, [ancestorPathId, renderVersion]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />

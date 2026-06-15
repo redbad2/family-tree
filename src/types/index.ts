@@ -9,6 +9,17 @@ export interface Spouse {
   deathDate: string | null;
 }
 
+/** 个人生平事件类型 */
+export type PersonalEventType = 'birth' | 'marriage' | 'child' | 'migration' | 'achievement' | 'death' | 'other';
+
+/** 个人生平事件 */
+export interface PersonalEvent {
+  year: number;
+  title: string;
+  type: PersonalEventType;
+  note?: string;
+}
+
 /** 性别 */
 export type Gender = 'male' | 'female';
 
@@ -41,6 +52,8 @@ export interface Person {
   migrationLocation: string | null;
   /** 出生日期是否为推断值 */
   birthDateInferred?: boolean;
+  /** 个人生平事件（出生外的关键节点） */
+  personalEvents?: PersonalEvent[];
 }
 
 /** 父子关系边 */
@@ -73,7 +86,7 @@ export interface KinshipResult {
 }
 
 /** 节点高亮状态 */
-export type NodeState = 'default' | 'selected' | 'parent' | 'child' | 'path';
+export type NodeState = 'default' | 'selected' | 'parent' | 'child' | 'path' | 'alive' | 'ancestor';
 
 /** 节点选中模式 */
 export type SelectionMode = 'single' | 'dual';
