@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { Modal, Form, Select, Switch, Button, Tabs, Spin, message, Space } from 'antd';
+import { Modal, Form, Select, Switch, Button, Tabs, Spin, message, Space, Drawer } from 'antd';
 import { DownloadOutlined, FilePdfOutlined, FileTextOutlined } from '@ant-design/icons';
 import type { FamilyTreeData } from '../types';
 import { buildOushiTables, buildSushiTree, formatSushiNodeText } from '../utils/exportLineage';
@@ -10,6 +10,7 @@ interface LineageExportModalProps {
   open: boolean;
   onClose: () => void;
   data: FamilyTreeData;
+  isMobile?: boolean;
 }
 
 type ExportFormat = 'oushi' | 'sushi';
@@ -28,7 +29,7 @@ const OUSHI_COLUMNS = [
   { key: 'branch', label: '分支' },
 ];
 
-export default function LineageExportModal({ open, onClose, data }: LineageExportModalProps) {
+export default function LineageExportModal({ open, onClose, data, isMobile = false }: LineageExportModalProps) {
   const [form] = Form.useForm();
   const previewRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
@@ -164,6 +165,129 @@ export default function LineageExportModal({ open, onClose, data }: LineageExpor
     message.success('文本导出成功');
   }, [data, format, startGen, endGen, includeSpouses, includeDates, includeDeeds]);
 
+  const innerContent = (
+    <div style={{ display: 'flex', gap: isMobile ? 0 : 16, flexDirection: isMobile ? 'column' : 'row', height: isMobile ? 'auto' : 520 }}>
+      {/* 左侧选项 */}
+      <div style={{ width: isMobile ? '100%' : 240, flexShrink: 0 }}>
+        <Form
+          form={form}
+          layout={isMobile ? 'horizontal' : 'vertical'}
+          initialValues={{
+            format: 'oushi',
+            startGen: genRange.min,
+            endGen: genRange.max,
+            includeSpouses: true,
+            includeDates: true,
+            includeDeeds: false,
+          }}
+          size="small"
+        >
+          <Form.Item name="format" label="格式">
+            <Select
+              options={[
+                { value: 'oushi', label: '欧式（表格）' },
+                { value: 'sushi', label: '苏式（横行）' },
+              ]}
+            />
+          </Form.Item>
+          {format === 'oushi' && (
+            <>
+              <Form.Item name="startGen" label="起始世代">
+                <Select
+                  options={Array.from(
+                    { length: genRange.max - genRange.min + 1 },
+                    (_, i) => ({
+                      value: genRange.min + i,
+                      label: `第${genRange.min + i}世`,
+                    }),
+                  )}
+                />
+              </Form.Item>
+              <Form.Item name="endGen" label="结束世代">
+                <Select
+                  options={Array.from(
+                    { length: genRange.max - genRange.min + 1 },
+                    (_, i) => ({
+                      value: genRange.min + i,
+                      label: `第${genRange.min + i}世`,
+                    }),
+                  )}
+                />
+              </Form.Item>
+            </>
+          )}
+          {format === 'sushi' && (
+            <>
+              <Form.Item name="includeSpouses" label="显示配偶" valuePropName="checked">
+                <Switch size="small" />
+              </Form.Item>
+              <Form.Item name="includeDates" label="显示生卒年" valuePropName="checked">
+                <Switch size="small" />
+              </Form.Item>
+              <Form.Item name="includeDeeds" label="显示事迹" valuePropName="checked">
+                <Switch size="small" />
+              </Form.Item>
+            </>
+          )}
+        </Form>
+        <div style={{ marginTop: 16 }}>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Button
+              icon={<FilePdfOutlined />}
+              onClick={handleExportPDF}
+              loading={exporting}
+              block
+            >
+              导出 PDF
+            </Button>
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={handleExportText}
+              block
+            >
+              导出文本
+            </Button>
+          </Space>
+        </div>
+      </div>
+
+      {/* 右侧预览 */}
+      <div
+        style={{
+          flex: 1,
+          border: '1px solid #f0f0f0',
+          borderRadius: 6,
+          overflow: 'auto',
+          background: '#fff',
+          minHeight: isMobile ? 300 : undefined,
+        }}
+      >
+        <div ref={previewRef} style={{ padding: 16 }}>
+          {previewContent.type === 'oushi' ? (
+            <OushiPreview tables={previewContent.tables} />
+          ) : (
+            <SushiPreview lines={previewContent.lines} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer
+        title="导出世系表"
+        open={open}
+        onClose={onClose}
+        placement="bottom"
+        height="85vh"
+        destroyOnClose
+      >
+        {innerContent}
+      </Drawer>
+    );
+  }
+
   return (
     <Modal
       title="导出世系表"
@@ -173,110 +297,7 @@ export default function LineageExportModal({ open, onClose, data }: LineageExpor
       footer={null}
       destroyOnClose
     >
-      <div style={{ display: 'flex', gap: 16, height: 520 }}>
-        {/* 左侧选项 */}
-        <div style={{ width: 240, flexShrink: 0 }}>
-          <Form
-            form={form}
-            layout="vertical"
-            initialValues={{
-              format: 'oushi',
-              startGen: genRange.min,
-              endGen: genRange.max,
-              includeSpouses: true,
-              includeDates: true,
-              includeDeeds: false,
-            }}
-            size="small"
-          >
-            <Form.Item name="format" label="格式">
-              <Select
-                options={[
-                  { value: 'oushi', label: '欧式（表格）' },
-                  { value: 'sushi', label: '苏式（横行）' },
-                ]}
-              />
-            </Form.Item>
-            {format === 'oushi' && (
-              <>
-                <Form.Item name="startGen" label="起始世代">
-                  <Select
-                    options={Array.from(
-                      { length: genRange.max - genRange.min + 1 },
-                      (_, i) => ({
-                        value: genRange.min + i,
-                        label: `第${genRange.min + i}世`,
-                      }),
-                    )}
-                  />
-                </Form.Item>
-                <Form.Item name="endGen" label="结束世代">
-                  <Select
-                    options={Array.from(
-                      { length: genRange.max - genRange.min + 1 },
-                      (_, i) => ({
-                        value: genRange.min + i,
-                        label: `第${genRange.min + i}世`,
-                      }),
-                    )}
-                  />
-                </Form.Item>
-              </>
-            )}
-            {format === 'sushi' && (
-              <>
-                <Form.Item name="includeSpouses" label="显示配偶" valuePropName="checked">
-                  <Switch size="small" />
-                </Form.Item>
-                <Form.Item name="includeDates" label="显示生卒年" valuePropName="checked">
-                  <Switch size="small" />
-                </Form.Item>
-                <Form.Item name="includeDeeds" label="显示事迹" valuePropName="checked">
-                  <Switch size="small" />
-                </Form.Item>
-              </>
-            )}
-          </Form>
-          <div style={{ marginTop: 16 }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Button
-                icon={<FilePdfOutlined />}
-                onClick={handleExportPDF}
-                loading={exporting}
-                block
-              >
-                导出 PDF
-              </Button>
-              <Button
-                icon={<FileTextOutlined />}
-                onClick={handleExportText}
-                block
-              >
-                导出文本
-              </Button>
-            </Space>
-          </div>
-        </div>
-
-        {/* 右侧预览 */}
-        <div
-          style={{
-            flex: 1,
-            border: '1px solid #f0f0f0',
-            borderRadius: 6,
-            overflow: 'auto',
-            background: '#fff',
-          }}
-        >
-          <div ref={previewRef} style={{ padding: 16 }}>
-            {previewContent.type === 'oushi' ? (
-              <OushiPreview tables={previewContent.tables} />
-            ) : (
-              <SushiPreview lines={previewContent.lines} />
-            )}
-          </div>
-        </div>
-      </div>
+      {innerContent}
     </Modal>
   );
 }

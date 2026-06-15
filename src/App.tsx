@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { ConfigProvider, Layout, theme, message, Button } from 'antd';
+import { ConfigProvider, Layout, theme, message, Button, Drawer } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { ClockCircleOutlined, RightOutlined, LeftOutlined } from '@ant-design/icons';
 import FamilyTreeGraph from './components/FamilyTreeGraph';
@@ -10,6 +10,7 @@ import Toolbar from './components/Toolbar';
 import Timeline from './components/Timeline';
 import StatisticsPanel from './components/StatisticsPanel';
 import LineageExportModal from './components/LineageExportModal';
+import FilterPanel from './components/FilterPanel';
 import { sampleFamilyTree } from './data/sample';
 import type { FamilyTreeData, KinshipResult, SiderMode } from './types';
 import {
@@ -28,6 +29,7 @@ import {
   movePersonAmongSiblings,
 } from './utils/mutations';
 import { saveToDisk, removeStoredFileHandle } from './utils/fileSystem';
+import { useIsMobile } from './hooks/useIsMobile';
 
 const { Content } = Layout;
 
@@ -55,7 +57,113 @@ function getGraphInstance() {
   return (window as any).__familyTreeGraph;
 }
 
+/** 右侧面板内容（桌面 & 移动端共用） */
+function RightPanelContent({
+  siderMode,
+  selectedPerson,
+  parentName,
+  childrenNames,
+  siblingIndex,
+  siblingCount,
+  selectedIds,
+  kinshipResult,
+  personA,
+  personB,
+  treeData,
+  rangeStart,
+  rangeEnd,
+  branches,
+  handleAddChild,
+  handleEdit,
+  handleDelete,
+  handleAddRoot,
+  handleMoveUp,
+  handleMoveDown,
+  handleTraceAncestors,
+  handleFormSubmit,
+  handleFormCancel,
+  handleFilterSelect,
+}: {
+  siderMode: SiderMode;
+  selectedPerson: any;
+  parentName: string | null;
+  childrenNames: string[];
+  siblingIndex: number;
+  siblingCount: number;
+  selectedIds: string[];
+  kinshipResult: KinshipResult | null;
+  personA: any;
+  personB: any;
+  treeData: FamilyTreeData;
+  rangeStart: number;
+  rangeEnd: number;
+  branches: string[];
+  handleAddChild: () => void;
+  handleEdit: () => void;
+  handleDelete: () => void;
+  handleAddRoot: () => void;
+  handleMoveUp: () => void;
+  handleMoveDown: () => void;
+  handleTraceAncestors: (id: string) => void;
+  handleFormSubmit: (values: any) => void;
+  handleFormCancel: () => void;
+  handleFilterSelect: (personId: string) => void;
+}) {
+  return (
+    <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
+      {siderMode === 'view' && (
+        <>
+          <PersonDetail
+            person={selectedPerson}
+            parentName={parentName}
+            childrenNames={childrenNames}
+            siblingIndex={siblingIndex}
+            siblingCount={siblingCount}
+            onAddChild={handleAddChild}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onAddRoot={handleAddRoot}
+            onMoveUp={handleMoveUp}
+            onMoveDown={handleMoveDown}
+            hasSelection={selectedIds.length > 0}
+            onTraceAncestors={handleTraceAncestors}
+          />
+          {selectedIds.length >= 2 && (
+            <KinshipPanel
+              result={kinshipResult}
+              personA={personA}
+              personB={personB}
+            />
+          )}
+          <StatisticsPanel
+            persons={treeData.persons}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+            basePersonId={selectedIds[0] ?? null}
+          />
+          <FilterPanel
+            persons={treeData.persons}
+            onSelect={handleFilterSelect}
+          />
+        </>
+      )}
+      {(siderMode === 'add-child' || siderMode === 'add-root' || siderMode === 'edit') && (
+        <PersonForm
+          mode={siderMode}
+          parentPerson={siderMode === 'add-child' ? selectedPerson : null}
+          person={siderMode === 'edit' ? selectedPerson : null}
+          existingBranches={branches}
+          onSubmit={handleFormSubmit}
+          onCancel={handleFormCancel}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function App() {
+  const isMobile = useIsMobile();
+
   const [treeData, setTreeData] = useState<FamilyTreeData>(() => {
     // 优先从 localStorage 恢复，避免刷新丢失数据；无则回退到示例数据
     return loadFromStorage() ?? sampleFamilyTree;
@@ -73,6 +181,8 @@ export default function App() {
   const leftSiderDragRef = useRef(false);
   const [rightSiderCollapsed, setRightSiderCollapsed] = useState(true);
   const [lineageExportOpen, setLineageExportOpen] = useState(false);
+  const [showLeafMark, setShowLeafMark] = useState(false);
+  const [showIncompleteMark, setShowIncompleteMark] = useState(false);
   const handleToggleRightSider = useCallback(() => {
     setRightSiderCollapsed(prev => !prev);
   }, []);
@@ -293,8 +403,6 @@ export default function App() {
       return;
     }
     setTreeData(result.data);
-    // 删除后不清除选中，而是选中其父节点（如果有），保持视图连贯
-    // 与编辑节点保持一致：操作后不重置视图状态
     if (selectedPerson.parentId) {
       setSelectedIds([selectedPerson.parentId]);
     } else {
@@ -309,7 +417,6 @@ export default function App() {
       if (siderMode === 'add-child' && selectedPerson) {
         const newData = addChildPerson(treeData, selectedPerson.id, values);
         setTreeData(newData);
-        // 保持选中当前节点（父节点），不切换到新节点
         setSelectedIds([selectedPerson.id]);
       } else if (siderMode === 'add-root') {
         const newData = addRootPerson(treeData, values);
@@ -341,6 +448,34 @@ export default function App() {
     setSiderMode('view');
   }, []);
 
+  // 共享的面板 props
+  const panelProps = {
+    siderMode,
+    selectedPerson,
+    parentName,
+    childrenNames,
+    siblingIndex,
+    siblingCount,
+    selectedIds,
+    kinshipResult,
+    personA,
+    personB,
+    treeData,
+    rangeStart,
+    rangeEnd,
+    branches,
+    handleAddChild,
+    handleEdit,
+    handleDelete,
+    handleAddRoot,
+    handleMoveUp,
+    handleMoveDown,
+    handleTraceAncestors,
+    handleFormSubmit,
+    handleFormCancel,
+    handleFilterSelect: handleSearchSelect,
+  };
+
   return (
     <ConfigProvider
       locale={zhCN}
@@ -361,57 +496,119 @@ export default function App() {
           onSave={handleSave}
           onSearchSelect={handleSearchSelect}
           onExportLineage={() => setLineageExportOpen(true)}
+          showLeafMark={showLeafMark}
+          showIncompleteMark={showIncompleteMark}
+          onToggleLeafMark={() => setShowLeafMark(prev => !prev)}
+          onToggleIncompleteMark={() => setShowIncompleteMark(prev => !prev)}
           persons={treeData.persons}
           hasUnsavedChanges={hasUnsavedChanges}
           savedFileName={savedFileName}
+          isMobile={isMobile}
         />
-        <Layout hasSider style={{ flexDirection: 'row' }}>
+
+        {isMobile ? (
+          /* ========== 移动端布局 ========== */
+          <Content style={{ position: 'relative', background: '#f5f5f5' }}>
+            <FamilyTreeGraph
+              data={treeData}
+              selectedIds={selectedIds}
+              currentYear={currentYear}
+              ancestorPathId={ancestorPathId}
+              showLeafMark={showLeafMark}
+              showIncompleteMark={showIncompleteMark}
+              onNodeSelect={handleNodeSelect}
+              onKinshipResult={handleKinshipResult}
+            />
+          </Content>
+        ) : (
+          /* ========== 桌面端布局 ========== */
+          <Layout hasSider style={{ flexDirection: 'row' }}>
             <div style={{ display: 'flex', height: '100%' }}>
-            {/* 左侧 Sider */}
-            <div
-              style={{
-                width: leftSiderCollapsed ? 0 : leftSiderWidth,
-                minWidth: leftSiderCollapsed ? 0 : leftSiderWidth,
-                transition: leftSiderDragRef.current ? 'none' : 'width 0.2s, min-width 0.2s',
-                overflow: 'hidden',
-                borderRight: leftSiderCollapsed ? 'none' : '1px solid #f0f0f0',
-                background: '#fff',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
-              <Timeline
-                minYear={minYear}
-                maxYear={maxYear}
-                currentYear={currentYear ?? minYear}
-                rangeStart={rangeStart}
-                rangeEnd={rangeEnd}
-                persons={treeData.persons}
-                onCurrentYearChange={handleCurrentYearChange}
-                onRangeChange={handleRangeChange}
-              />
-            </div>
-            {/* 拖拽调整宽度的分隔条 */}
-            {!leftSiderCollapsed && (
+              {/* 左侧 Sider */}
               <div
                 style={{
-                  width: 4,
-                  minWidth: 4,
-                  cursor: 'col-resize',
-                  background: 'transparent',
-                  position: 'relative',
-                  zIndex: 10,
+                  width: leftSiderCollapsed ? 0 : leftSiderWidth,
+                  minWidth: leftSiderCollapsed ? 0 : leftSiderWidth,
+                  transition: leftSiderDragRef.current ? 'none' : 'width 0.2s, min-width 0.2s',
+                  overflow: 'hidden',
+                  borderRight: leftSiderCollapsed ? 'none' : '1px solid #f0f0f0',
+                  background: '#fff',
+                  display: 'flex',
+                  flexDirection: 'column',
                 }}
-                onMouseDown={() => {
-                  leftSiderDragRef.current = true;
-                  document.body.style.cursor = 'col-resize';
-                  document.body.style.userSelect = 'none';
+              >
+                <Timeline
+                  minYear={minYear}
+                  maxYear={maxYear}
+                  currentYear={currentYear ?? minYear}
+                  rangeStart={rangeStart}
+                  rangeEnd={rangeEnd}
+                  persons={treeData.persons}
+                  onCurrentYearChange={handleCurrentYearChange}
+                  onRangeChange={handleRangeChange}
+                />
+              </div>
+              {/* 拖拽调整宽度的分隔条 */}
+              {!leftSiderCollapsed && (
+                <div
+                  style={{
+                    width: 4,
+                    minWidth: 4,
+                    cursor: 'col-resize',
+                    background: 'transparent',
+                    position: 'relative',
+                    zIndex: 10,
+                  }}
+                  onMouseDown={() => {
+                    leftSiderDragRef.current = true;
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                  }}
+                />
+              )}
+              {/* 收起/展开按钮 */}
+              <div
+                onClick={handleToggleLeftSider}
+                style={{
+                  width: 20,
+                  minWidth: 20,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  background: '#fafafa',
+                  borderRight: '1px solid #f0f0f0',
+                  transition: 'background 0.2s',
                 }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#f0f0f0';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#fafafa';
+                }}
+              >
+                {leftSiderCollapsed ? (
+                  <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+                ) : (
+                  <LeftOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+                )}
+              </div>
+            </div>
+            <Content style={{ position: 'relative', background: '#f5f5f5' }}>
+              <FamilyTreeGraph
+                data={treeData}
+                selectedIds={selectedIds}
+                currentYear={currentYear}
+                ancestorPathId={ancestorPathId}
+                showLeafMark={showLeafMark}
+                showIncompleteMark={showIncompleteMark}
+                onNodeSelect={handleNodeSelect}
+                onKinshipResult={handleKinshipResult}
               />
-            )}
-            {/* 收起/展开按钮 */}
+            </Content>
+            {/* 右侧收起/展开按钮 */}
             <div
-              onClick={handleToggleLeftSider}
+              onClick={handleToggleRightSider}
               style={{
                 width: 20,
                 minWidth: 20,
@@ -420,7 +617,7 @@ export default function App() {
                 justifyContent: 'center',
                 cursor: 'pointer',
                 background: '#fafafa',
-                borderRight: '1px solid #f0f0f0',
+                borderLeft: '1px solid #f0f0f0',
                 transition: 'background 0.2s',
               }}
               onMouseEnter={(e) => {
@@ -430,114 +627,50 @@ export default function App() {
                 e.currentTarget.style.background = '#fafafa';
               }}
             >
-              {leftSiderCollapsed ? (
-                <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
-              ) : (
+              {rightSiderCollapsed ? (
                 <LeftOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
+              ) : (
+                <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
               )}
             </div>
-          </div>
-          <Content style={{ position: 'relative', background: '#f5f5f5' }}>
-            <FamilyTreeGraph
-              data={treeData}
-              selectedIds={selectedIds}
-              currentYear={currentYear}
-              ancestorPathId={ancestorPathId}
-              onNodeSelect={handleNodeSelect}
-              onKinshipResult={handleKinshipResult}
-            />
-          </Content>
-          {/* 右侧收起/展开按钮 */}
-          <div
-            onClick={handleToggleRightSider}
-            style={{
-              width: 20,
-              minWidth: 20,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              background: '#fafafa',
-              borderLeft: '1px solid #f0f0f0',
-              transition: 'background 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#f0f0f0';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#fafafa';
-            }}
-          >
-            {rightSiderCollapsed ? (
-              <LeftOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
-            ) : (
-              <RightOutlined style={{ fontSize: 12, color: '#8e44ad' }} />
-            )}
-          </div>
-          {/* 右侧面板 */}
-          <div
-            style={{
-              width: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
-              minWidth: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
-              transition: 'width 0.2s, min-width 0.2s',
-              overflow: 'hidden',
-              borderLeft: rightSiderCollapsed ? 'none' : '1px solid #f0f0f0',
-              background: '#fff',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <div style={{ padding: 16, overflowY: 'auto', flex: 1 }}>
-              {siderMode === 'view' && (
-                <>
-                  <PersonDetail
-                    person={selectedPerson}
-                    parentName={parentName}
-                    childrenNames={childrenNames}
-                    siblingIndex={siblingIndex}
-                    siblingCount={siblingCount}
-                    onAddChild={handleAddChild}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onAddRoot={handleAddRoot}
-                    onMoveUp={handleMoveUp}
-                    onMoveDown={handleMoveDown}
-                    hasSelection={selectedIds.length > 0}
-                    onTraceAncestors={handleTraceAncestors}
-                  />
-                  {selectedIds.length >= 2 && (
-                    <KinshipPanel
-                      result={kinshipResult}
-                      personA={personA}
-                      personB={personB}
-                    />
-                  )}
-                  <StatisticsPanel
-                    persons={treeData.persons}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    basePersonId={selectedIds[0] ?? null}
-                  />
-                </>
-              )}
-              {(siderMode === 'add-child' || siderMode === 'add-root' || siderMode === 'edit') && (
-                <PersonForm
-                  mode={siderMode}
-                  parentPerson={siderMode === 'add-child' ? selectedPerson : null}
-                  person={siderMode === 'edit' ? selectedPerson : null}
-                  existingBranches={branches}
-                  onSubmit={handleFormSubmit}
-                  onCancel={handleFormCancel}
-                />
-              )}
+            {/* 右侧面板 */}
+            <div
+              style={{
+                width: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
+                minWidth: rightSiderCollapsed ? 0 : RIGHT_SIDER_WIDTH,
+                transition: 'width 0.2s, min-width 0.2s',
+                overflow: 'hidden',
+                borderLeft: rightSiderCollapsed ? 'none' : '1px solid #f0f0f0',
+                background: '#fff',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <RightPanelContent {...panelProps} />
             </div>
-          </div>
-        </Layout>
+          </Layout>
+        )}
       </Layout>
+
+      {/* 移动端底部抽屉 */}
+      {isMobile && (
+        <Drawer
+          placement="bottom"
+          height="60vh"
+          open={!rightSiderCollapsed}
+          onClose={() => setRightSiderCollapsed(true)}
+          title={selectedPerson?.name ?? '人物详情'}
+          styles={{ body: { padding: 0, overflowY: 'auto' } }}
+        >
+          <RightPanelContent {...panelProps} />
+        </Drawer>
+      )}
+
       <LineageExportModal
         open={lineageExportOpen}
         onClose={() => setLineageExportOpen(false)}
         data={treeData}
+        isMobile={isMobile}
       />
     </ConfigProvider>
   );

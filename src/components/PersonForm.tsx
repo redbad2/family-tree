@@ -80,6 +80,7 @@ export default function PersonForm({
         deeds: person.deeds ?? '',
         needsVerification: person.needsVerification,
         migrationLocation: person.migrationLocation ?? '',
+        photoUrl: person.photoUrl ?? '',
         spouses: person.spouses.map((s) => ({ name: s.name, type: s.type, birthDate: s.birthDate ?? '', deathDate: s.deathDate ?? '' })),
         personalEvents: (person.personalEvents ?? []).map((e) => ({ year: e.year, title: e.title, type: e.type, note: e.note ?? '' })),
       });
@@ -95,6 +96,7 @@ export default function PersonForm({
         deeds: '',
         needsVerification: false,
         migrationLocation: '',
+        photoUrl: '',
         spouses: [],
         personalEvents: [],
       });
@@ -110,6 +112,7 @@ export default function PersonForm({
         deeds: '',
         needsVerification: false,
         migrationLocation: '',
+        photoUrl: '',
         spouses: [],
         personalEvents: [],
       });
@@ -138,6 +141,7 @@ export default function PersonForm({
       deeds: values.deeds || null,
       needsVerification: !!values.needsVerification,
       migrationLocation: values.migrationLocation?.trim() || null,
+      photoUrl: values.photoUrl?.trim() || undefined,
       spouses,
       personalEvents: (values.personalEvents || [])
         .filter((e: any) => e.year != null && e.title?.trim())
@@ -230,6 +234,10 @@ export default function PersonForm({
 
         <Form.Item name="migrationLocation" label="迁移地">
           <Input placeholder="如：北京、上海、广东" />
+        </Form.Item>
+
+        <Form.Item name="photoUrl" label="照片URL" extra="暂为占位，输入图片URL可预览">
+          <Input placeholder="https://example.com/photo.jpg" />
         </Form.Item>
 
         <Form.Item name="needsVerification" valuePropName="checked">

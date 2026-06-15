@@ -3,7 +3,7 @@ import { Descriptions, Tag, Empty, Button, Space, Popconfirm, Tooltip, Divider, 
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, UserAddOutlined,
   ArrowUpOutlined, ArrowDownOutlined, QuestionCircleOutlined,
-  HistoryOutlined, AimOutlined,
+  HistoryOutlined, AimOutlined, UserOutlined,
 } from '@ant-design/icons';
 import type { Person, PersonalEvent } from '../types';
 import { calculateLifespan, generationLabel, getYear } from '../utils/tree';
@@ -114,26 +114,53 @@ export default function PersonDetail({
         )}
       </div>
 
-      <Descriptions
-        title={
-          <span>
+      {/* 头像 + 姓名 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        {person.photoUrl ? (
+          <img
+            src={person.photoUrl}
+            alt={person.name}
+            style={{
+              width: 48, height: 48, borderRadius: '50%',
+              objectFit: 'cover', border: '2px solid #8e44ad',
+            }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none';
+              (e.target as HTMLImageElement).nextElementSibling?.remove();
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 48, height: 48, borderRadius: '50%',
+              background: person.gender === 'female' ? '#ad1457' : '#8e44ad',
+              color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 20, fontWeight: 700,
+            }}
+          >
+            {person.name.charAt(0)}
+          </div>
+        )}
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>
             {person.name}
             {person.needsVerification && (
               <Tag color="red" style={{ marginLeft: 8 }}>待勘误</Tag>
             )}
-          </span>
-        }
+          </div>
+          <div style={{ fontSize: 12, color: '#666' }}>
+            {generationLabel(person.generation)} · {person.gender === 'male' ? '男' : '女'}
+            {person.branch && ` · ${person.branch}`}
+          </div>
+        </div>
+      </div>
+
+      <Descriptions
         bordered
         size="small"
         column={1}
         labelStyle={{ width: 80, fontWeight: 600 }}
       >
-        <Descriptions.Item label="世代">
-          {generationLabel(person.generation)}
-        </Descriptions.Item>
-        <Descriptions.Item label="性别">
-          {person.gender === 'male' ? '男' : '女'}
-        </Descriptions.Item>
         {person.branch && (
           <Descriptions.Item label="分支">
             <Tag color="blue">{person.branch}</Tag>

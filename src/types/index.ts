@@ -54,12 +54,21 @@ export interface Person {
   birthDateInferred?: boolean;
   /** 个人生平事件（出生外的关键节点） */
   personalEvents?: PersonalEvent[];
+  /** 照片 URL（占位字段，暂不实现上传存储） */
+  photoUrl?: string;
 }
+
+/** 父子关系类型 */
+export type ParentChildRelationType = 'biological' | 'adoptive' | 'dual-inheritance';
 
 /** 父子关系边 */
 export interface ParentChildRelation {
   parent: string;
   child: string;
+  /** 关系类型：biological=亲生，adoptive=过继，dual-inheritance=兼祧。旧数据无此字段默认为 biological */
+  type?: ParentChildRelationType;
+  /** 备注（如"兼祧两房"） */
+  note?: string;
 }
 
 /** 族谱数据格式（导入导出用） */
@@ -86,7 +95,7 @@ export interface KinshipResult {
 }
 
 /** 节点高亮状态 */
-export type NodeState = 'default' | 'selected' | 'parent' | 'child' | 'path' | 'alive' | 'ancestor';
+export type NodeState = 'default' | 'selected' | 'parent' | 'child' | 'path' | 'alive' | 'ancestor' | 'leaf' | 'incomplete';
 
 /** 节点选中模式 */
 export type SelectionMode = 'single' | 'dual';

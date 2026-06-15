@@ -11,6 +11,9 @@ import {
   SaveOutlined,
   SearchOutlined,
   TableOutlined,
+  MenuOutlined,
+  ScissorOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import type { FamilyTreeData, Person } from '../types';
 
@@ -25,9 +28,14 @@ interface ToolbarProps {
   onSave: () => void;
   onSearchSelect: (personId: string) => void;
   onExportLineage: () => void;
+  showLeafMark: boolean;
+  showIncompleteMark: boolean;
+  onToggleLeafMark: () => void;
+  onToggleIncompleteMark: () => void;
   persons: Person[];
   hasUnsavedChanges: boolean;
   savedFileName?: string;
+  isMobile?: boolean;
 }
 
 export default function Toolbar({
@@ -41,9 +49,14 @@ export default function Toolbar({
   onSave,
   onSearchSelect,
   onExportLineage,
+  showLeafMark,
+  showIncompleteMark,
+  onToggleLeafMark,
+  onToggleIncompleteMark,
   persons,
   hasUnsavedChanges,
   savedFileName,
+  isMobile = false,
 }: ToolbarProps) {
   const [searchText, setSearchText] = useState('');
   const justSelectedRef = useRef(false);
@@ -117,6 +130,89 @@ export default function Toolbar({
     return false;
   };
 
+  if (isMobile) {
+    return (
+      <div
+        style={{
+          padding: '6px 8px',
+          borderBottom: '1px solid #f0f0f0',
+          background: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        <AutoComplete
+          value={searchText}
+          onChange={handleSearchChange}
+          onSelect={handleSearchSelect}
+          options={filteredOptions}
+          style={{ width: 160, flexShrink: 0 }}
+          filterOption={false}
+        >
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="搜索..."
+            size="small"
+            allowClear
+            onClear={() => setSearchText('')}
+          />
+        </AutoComplete>
+        <Tooltip title="保存">
+          <Button icon={<SaveOutlined />} size="small" type="primary" onClick={onSave} />
+        </Tooltip>
+        {hasUnsavedChanges && <Tag color="orange" style={{ fontSize: 10 }}>未保存</Tag>}
+        <Tooltip title="添加始祖">
+          <Button icon={<UserAddOutlined />} size="small" onClick={onAddRoot} />
+        </Tooltip>
+        <Tooltip title="导入">
+          <Upload accept=".json" showUploadList={false} beforeUpload={handleImport}>
+            <Button icon={<ImportOutlined />} size="small" />
+          </Upload>
+        </Tooltip>
+        <Tooltip title="导出JSON">
+          <Button icon={<ExportOutlined />} size="small" onClick={onExport} />
+        </Tooltip>
+        <Tooltip title="世系表">
+          <Button icon={<TableOutlined />} size="small" onClick={onExportLineage} />
+        </Tooltip>
+        <div style={{ width: 1, height: 20, background: '#e8e8e8', flexShrink: 0 }} />
+        <Tooltip title="放大">
+          <Button icon={<ZoomInOutlined />} size="small" onClick={onZoomIn} />
+        </Tooltip>
+        <Tooltip title="缩小">
+          <Button icon={<ZoomOutOutlined />} size="small" onClick={onZoomOut} />
+        </Tooltip>
+        <Tooltip title="适配">
+          <Button icon={<FullscreenOutlined />} size="small" onClick={onFitView} />
+        </Tooltip>
+        <Tooltip title="清除选中">
+          <Button icon={<UndoOutlined />} size="small" onClick={onClearSelection} />
+        </Tooltip>
+        <div style={{ width: 1, height: 20, background: '#e8e8e8', flexShrink: 0 }} />
+        <Tooltip title={showLeafMark ? '隐藏无后代' : '无后代标记'}>
+          <Button
+            icon={<ScissorOutlined />}
+            size="small"
+            type={showLeafMark ? 'primary' : 'default'}
+            onClick={onToggleLeafMark}
+          />
+        </Tooltip>
+        <Tooltip title={showIncompleteMark ? '隐藏待补' : '待补标记'}>
+          <Button
+            icon={<ExclamationCircleOutlined />}
+            size="small"
+            type={showIncompleteMark ? 'primary' : 'default'}
+            onClick={onToggleIncompleteMark}
+          />
+        </Tooltip>
+      </div>
+    );
+  }
+
+  // 桌面端布局
   return (
     <div
       style={{
@@ -137,7 +233,7 @@ export default function Toolbar({
         <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
         <AutoComplete
           value={searchText}
-            onChange={handleSearchChange}
+          onChange={handleSearchChange}
           onSelect={handleSearchSelect}
           options={filteredOptions}
           style={{ width: 240 }}
@@ -204,6 +300,23 @@ export default function Toolbar({
           <Button icon={<UndoOutlined />} size="small" onClick={onClearSelection}>
             清除选中
           </Button>
+        </Tooltip>
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
+        <Tooltip title={showLeafMark ? '隐藏无后代标记' : '显示无后代标记'}>
+          <Button
+            icon={<ScissorOutlined />}
+            size="small"
+            type={showLeafMark ? 'primary' : 'default'}
+            onClick={onToggleLeafMark}
+          />
+        </Tooltip>
+        <Tooltip title={showIncompleteMark ? '隐藏待补标记' : '显示待补标记（待勘误/推断年份）'}>
+          <Button
+            icon={<ExclamationCircleOutlined />}
+            size="small"
+            type={showIncompleteMark ? 'primary' : 'default'}
+            onClick={onToggleIncompleteMark}
+          />
         </Tooltip>
       </Space>
     </div>

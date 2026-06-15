@@ -27,6 +27,7 @@ export function addChildPerson(
     deeds?: string | null;
     migrationLocation?: string | null;
     personalEvents?: PersonalEvent[];
+    photoUrl?: string;
   },
 ): FamilyTreeData {
   const parent = data.persons.find((p) => p.id === parentId);
@@ -48,6 +49,7 @@ export function addChildPerson(
     needsVerification: false,
     migrationLocation: fields.migrationLocation ?? null,
     personalEvents: fields.personalEvents,
+    photoUrl: fields.photoUrl,
   };
 
   return {
@@ -72,6 +74,7 @@ export function addRootPerson(
     deeds?: string | null;
     migrationLocation?: string | null;
     personalEvents?: PersonalEvent[];
+    photoUrl?: string;
   },
 ): FamilyTreeData {
   const id = generatePersonId();
@@ -90,6 +93,7 @@ export function addRootPerson(
     needsVerification: false,
     migrationLocation: fields.migrationLocation ?? null,
     personalEvents: fields.personalEvents,
+    photoUrl: fields.photoUrl,
   };
 
   return {

@@ -21,6 +21,10 @@ interface FamilyTreeGraphProps {
   currentYear: number | null;
   /** 祖先路径回溯的起始节点 ID，设置后高亮该节点到始祖的直系祖先链 */
   ancestorPathId: string | null;
+  /** 显示无后代叶子节点标记 */
+  showLeafMark: boolean;
+  /** 显示待补/待勘误节点标记 */
+  showIncompleteMark: boolean;
   onNodeSelect: (id: string, multi: boolean) => void;
   onKinshipResult: (result: KinshipResult | null) => void;
 }
@@ -174,6 +178,8 @@ export default function FamilyTreeGraph({
   selectedIds,
   currentYear,
   ancestorPathId,
+  showLeafMark,
+  showIncompleteMark,
   onNodeSelect,
   onKinshipResult,
 }: FamilyTreeGraphProps) {
@@ -226,6 +232,8 @@ export default function FamilyTreeGraph({
           path: { stroke: '#ffd43b', lineWidth: 3, shadowBlur: 6 },
           alive: { stroke: '#ffd700', lineWidth: 5, shadowBlur: 15, shadowColor: 'rgba(255, 215, 0, 0.7)' },
           ancestor: { stroke: '#9b59b6', lineWidth: 3, shadowBlur: 6 },
+          leaf: { opacity: 0.6, stroke: '#bbb', lineWidth: 1, lineDash: [3, 3] },
+          incomplete: { stroke: '#ff4d4f', lineWidth: 3, lineDash: [4, 2], shadowBlur: 8, shadowColor: 'rgba(255, 77, 79, 0.3)' },
         },
       },
       edge: {
@@ -499,6 +507,55 @@ export default function FamilyTreeGraph({
     }
     prevAncestorHighlightRef.current = newHighlights;
   }, [ancestorPathId, renderVersion]);
+
+  // 无后代/待补节点标记（可切换开关）
+  const prevMarkRef = useRef<string[]>([]);
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph || !graphReadyRef.current || graph.destroyed) return;
+
+    // 清除上次标记
+    if (prevMarkRef.current.length > 0) {
+      const clearStates: Record<string, string[]> = {};
+      for (const id of prevMarkRef.current) clearStates[id] = [];
+      graph.setElementState(clearStates);
+      prevMarkRef.current = [];
+    }
+
+    if (!showLeafMark && !showIncompleteMark) return;
+
+    const childrenMap = buildChildrenMap(data.persons);
+    const stateUpdates: Record<string, string[]> = {};
+    const newMarks: string[] = [];
+
+    for (const p of data.persons) {
+      const hasChildren = (childrenMap.get(p.id) ?? []).length > 0;
+
+      // 无后代叶子节点标记
+      if (showLeafMark && !hasChildren) {
+        stateUpdates[p.id] = ['leaf'];
+        newMarks.push(p.id);
+      }
+
+      // 待补/待勘误标记：needsVerification 或推断年份且无事迹无配偶
+      if (showIncompleteMark) {
+        const isIncomplete = p.needsVerification ||
+          (p.birthDateInferred && !p.deeds && p.spouses.length === 0);
+        if (isIncomplete && !stateUpdates[p.id]) {
+          stateUpdates[p.id] = ['incomplete'];
+          newMarks.push(p.id);
+        } else if (isIncomplete && stateUpdates[p.id]) {
+          // 如果已经有 leaf 标记，用 incomplete 覆盖（优先级更高）
+          stateUpdates[p.id] = ['incomplete'];
+        }
+      }
+    }
+
+    if (newMarks.length > 0) {
+      graph.setElementState(stateUpdates);
+    }
+    prevMarkRef.current = newMarks;
+  }, [showLeafMark, showIncompleteMark, renderVersion]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden' }} />

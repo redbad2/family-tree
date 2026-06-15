@@ -26,3 +26,36 @@ html, body, #root {
 ::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
+
+/* 移动端适配 */
+@media (max-width: 767px) {
+  /* 移动端隐藏桌面端侧边栏拖拽条等 */
+  .ant-layout-sider {
+    display: none !important;
+  }
+
+  /* 移动端 Drawer 圆角 */
+  .ant-drawer-bottom .ant-drawer-content-wrapper {
+    border-radius: 16px 16px 0 0;
+  }
+
+  /* 移动端搜索框适配 */
+  .ant-select {
+    min-width: 0 !important;
+  }
+
+  /* 表格横向滚动 */
+  .ant-descriptions-view {
+    overflow-x: auto;
+  }
+
+  /* Timeline 更紧凑 */
+  .ant-timeline {
+    font-size: 12px;
+  }
+
+  /* 触摸优化 */
+  button, .ant-btn {
+    min-height: 32px;
+  }
+}
