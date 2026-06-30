@@ -319,6 +319,40 @@ export default function FamilyTreeGraph({
     };
   }, [data]);
 
+  // 监听容器尺寸变化，自动同步 G6 画布大小
+  // 解决：左侧栏折叠/展开后容器宽度变化，但 G6 画布尺寸未跟随更新，
+  //       导致内容向左偏移、右侧出现等宽空白区域的问题。
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let rafId: number | undefined;
+
+    const resizeObserver = new ResizeObserver(() => {
+      const graph = graphRef.current;
+      if (!graph || !graphReadyRef.current || graph.destroyed) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (!w || !h) return;
+
+      // 用 rAF 防抖，避免 CSS transition 期间频繁 resize
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const g = graphRef.current;
+        if (!g || g.destroyed) return;
+        try {
+          g.resize(w, h);
+        } catch {}
+      });
+    });
+
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
   // 选中节点变化时聚焦（但视口恢复期间跳过，避免干扰已恢复的位置）
   useEffect(() => {
     const graph = graphRef.current;
