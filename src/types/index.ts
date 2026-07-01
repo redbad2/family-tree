@@ -102,3 +102,6 @@ export type SelectionMode = 'single' | 'dual';
 
 /** 右侧面板显示模式 */
 export type SiderMode = 'view' | 'add-child' | 'add-root' | 'edit';
+
+/** 树图视图模式：tree=标准树形图，pagoda=宝塔图，radial=扇形图 */
+export type ViewMode = 'tree' | 'pagoda' | 'radial';

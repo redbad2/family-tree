@@ -3,7 +3,7 @@ import { Graph, treeToGraphData, register, Rect } from '@antv/g6';
 import type { Point } from '@antv/g6';
 import { Text } from '@antv/g';
 import type { Group } from '@antv/g';
-import type { Person, FamilyTreeData, KinshipResult } from '../types';
+import type { Person, FamilyTreeData, KinshipResult, ViewMode } from '../types';
 import {
   buildPersonMap,
   buildChildrenMap,
@@ -23,8 +23,10 @@ interface FamilyTreeGraphProps {
   ancestorPathId: string | null;
   /** 显示无后代叶子节点标记 */
   showLeafMark: boolean;
-  /** 显示待补/待勘误节点标记 */
+    /** 显示待补/待勘误节点标记 */
   showIncompleteMark: boolean;
+  /** 视图模式：tree=标准树形, pagoda=宝塔图, radial=扇形图 */
+  viewMode: ViewMode;
   onNodeSelect: (id: string, multi: boolean) => void;
   onKinshipResult: (result: KinshipResult | null) => void;
 }
@@ -180,6 +182,7 @@ export default function FamilyTreeGraph({
   ancestorPathId,
   showLeafMark,
   showIncompleteMark,
+  viewMode,
   onNodeSelect,
   onKinshipResult,
 }: FamilyTreeGraphProps) {
@@ -236,17 +239,36 @@ export default function FamilyTreeGraph({
           incomplete: { stroke: '#ff4d4f', lineWidth: 3, lineDash: [4, 2], shadowBlur: 8, shadowColor: 'rgba(255, 77, 79, 0.3)' },
         },
       },
-      edge: {
-        type: 'cubic-vertical',
+            edge: {
+        type: viewMode === 'radial' ? 'cubic-radial' : 'cubic-vertical',
         style: { stroke: '#bbb', lineWidth: 1.5 },
         state: { highlight: { stroke: '#ffd43b', lineWidth: 3 } },
       },
-      layout: {
-        type: 'compact-box',
-        direction: 'TB',
-        getHGap: () => 20, getVGap: () => 60,
-        getWidth: () => 130, getHeight: () => 44,
-      },
+      layout:
+        viewMode === 'radial'
+          ? {
+              type: 'compact-box',
+              direction: 'TB',
+              radial: true,
+              getHGap: () => 30, getVGap: () => 80,
+              getWidth: () => 130, getHeight: () => 44,
+            }
+          : viewMode === 'pagoda'
+            ? {
+                type: 'dendrogram',
+                direction: 'TB',
+                nodeSep: 150,
+                rankSep: 80,
+                subTreeSep: 30,
+                getHGap: () => 10, getVGap: () => 80,
+                getWidth: () => 130, getHeight: () => 44,
+              }
+            : {
+                type: 'compact-box',
+                direction: 'TB',
+                getHGap: () => 20, getVGap: () => 60,
+                getWidth: () => 130, getHeight: () => 44,
+              },
       behaviors: [
         { type: 'drag-canvas', enable: true },
         'zoom-canvas',
@@ -317,39 +339,45 @@ export default function FamilyTreeGraph({
       graphReadyRef.current = false;
       (window as any).__familyTreeGraph = undefined;
     };
-  }, [data]);
+    }, [data, viewMode]);
 
-  // 监听容器尺寸变化，自动同步 G6 画布大小
+        // 监听容器尺寸变化，自动同步 G6 画布大小
   // 解决：左侧栏折叠/展开后容器宽度变化，但 G6 画布尺寸未跟随更新，
   //       导致内容向左偏移、右侧出现等宽空白区域的问题。
+  // 注意：用定时器防抖而非 rAF，等 CSS transition(0.2s) 结束后再做一次 resize，
+  //       避免动画过程中每帧 resize → 清空画布重绘 → 连续闪烁。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    let rafId: number | undefined;
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 
     const resizeObserver = new ResizeObserver(() => {
       const graph = graphRef.current;
       if (!graph || !graphReadyRef.current || graph.destroyed) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (!w || !h) return;
 
-      // 用 rAF 防抖，避免 CSS transition 期间频繁 resize
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
         const g = graphRef.current;
         if (!g || g.destroyed) return;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (!w || !h) return;
         try {
           g.resize(w, h);
+          // resize 后用动画平滑地将选中节点重新居中，避免视觉跳动
+          const selectedId = selectedIdsRef.current[0];
+          if (selectedId && g.hasNode(selectedId)) {
+            g.focusElement(selectedId, true);
+          }
         } catch {}
-      });
+      }, 220);
     });
 
     resizeObserver.observe(container);
     return () => {
       resizeObserver.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
+      if (resizeTimer) clearTimeout(resizeTimer);
     };
   }, []);
 

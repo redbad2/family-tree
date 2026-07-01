@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { AutoComplete, Button, Space, Tooltip, Tag, Input, Upload } from 'antd';
+import { AutoComplete, Button, Space, Tooltip, Tag, Input, Upload, Segmented, message } from 'antd';
 import {
   ExportOutlined,
   ImportOutlined,
@@ -14,8 +14,13 @@ import {
   MenuOutlined,
   ScissorOutlined,
   ExclamationCircleOutlined,
+  RedoOutlined,
+  RollbackOutlined,
+  ApartmentOutlined,
+  GoldOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons';
-import type { FamilyTreeData, Person } from '../types';
+import type { FamilyTreeData, Person, ViewMode } from '../types';
 
 interface ToolbarProps {
   onExport: () => void;
@@ -36,6 +41,17 @@ interface ToolbarProps {
   hasUnsavedChanges: boolean;
   savedFileName?: string;
   isMobile?: boolean;
+  /** 视图模式 */
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
+  /** 撤销/重做 */
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** GEDCOM 导入/导出 */
+  onExportGedcom: () => void;
+  onImportGedcom: (text: string) => void;
 }
 
 export default function Toolbar({
@@ -57,6 +73,14 @@ export default function Toolbar({
   hasUnsavedChanges,
   savedFileName,
   isMobile = false,
+  viewMode,
+  onViewModeChange,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onExportGedcom,
+  onImportGedcom,
 }: ToolbarProps) {
   const [searchText, setSearchText] = useState('');
   const justSelectedRef = useRef(false);
@@ -124,6 +148,20 @@ export default function Toolbar({
         onImport(data);
       } catch (err) {
         alert('导入失败：JSON 格式不正确');
+      }
+    };
+    reader.readAsText(file);
+    return false;
+  };
+
+  const handleImportGedcomFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        onImportGedcom(text);
+      } catch (err) {
+        message.error('GEDCOM 导入失败');
       }
     };
     reader.readAsText(file);
@@ -225,6 +263,36 @@ export default function Toolbar({
       }}
     >
       <Space>
+        {/* 视图模式切换 */}
+        <Segmented
+          size="small"
+          value={viewMode}
+          onChange={(v) => onViewModeChange(v as ViewMode)}
+          options={[
+            { label: '树形图', value: 'tree', icon: <ApartmentOutlined /> },
+            { label: '宝塔图', value: 'pagoda', icon: <GoldOutlined /> },
+            { label: '扇形图', value: 'radial', icon: <ShareAltOutlined /> },
+          ]}
+        />
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
+        {/* 撤销/重做 */}
+        <Tooltip title="撤销 (Ctrl+Z)">
+          <Button
+            icon={<RollbackOutlined />}
+            size="small"
+            onClick={onUndo}
+            disabled={!canUndo}
+          />
+        </Tooltip>
+        <Tooltip title="重做 (Ctrl+Y)">
+          <Button
+            icon={<RedoOutlined />}
+            size="small"
+            onClick={onRedo}
+            disabled={!canRedo}
+          />
+        </Tooltip>
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
         <Tooltip title="添加始祖">
           <Button icon={<UserAddOutlined />} size="small" onClick={onAddRoot}>
             添加始祖
@@ -283,6 +351,23 @@ export default function Toolbar({
         <Tooltip title="导出欧式/苏式世系表（PDF/文本）">
           <Button icon={<TableOutlined />} size="small" onClick={onExportLineage}>
             世系表
+          </Button>
+        </Tooltip>
+        <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />
+        <Tooltip title="导入 GEDCOM 文件（国际通用族谱格式）">
+          <Upload
+            accept=".ged,.gedcom"
+            showUploadList={false}
+            beforeUpload={handleImportGedcomFile}
+          >
+            <Button icon={<ImportOutlined />} size="small">
+              GEDCOM
+            </Button>
+          </Upload>
+        </Tooltip>
+        <Tooltip title="导出为 GEDCOM 文件">
+          <Button icon={<ExportOutlined />} size="small" onClick={onExportGedcom}>
+            GEDCOM
           </Button>
         </Tooltip>
         <div style={{ width: 1, height: 24, background: '#e8e8e8', margin: '0 4px' }} />

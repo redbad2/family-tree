@@ -12,7 +12,7 @@ import StatisticsPanel from './components/StatisticsPanel';
 import LineageExportModal from './components/LineageExportModal';
 import FilterPanel from './components/FilterPanel';
 import { sampleFamilyTree } from './data/sample';
-import type { FamilyTreeData, KinshipResult, SiderMode } from './types';
+import type { FamilyTreeData, KinshipResult, SiderMode, ViewMode } from './types';
 import {
   buildPersonMap,
   buildChildrenMap,
@@ -29,7 +29,9 @@ import {
   movePersonAmongSiblings,
 } from './utils/mutations';
 import { saveToDisk, removeStoredFileHandle } from './utils/fileSystem';
+import { exportToGedcom, parseGedcom } from './utils/gedcom';
 import { useIsMobile } from './hooks/useIsMobile';
+import { useUndoableState } from './hooks/useUndoableState';
 
 const { Content } = Layout;
 
@@ -164,14 +166,22 @@ function RightPanelContent({
 export default function App() {
   const isMobile = useIsMobile();
 
-  const [treeData, setTreeData] = useState<FamilyTreeData>(() => {
-    // 优先从 localStorage 恢复，避免刷新丢失数据；无则回退到示例数据
-    return loadFromStorage() ?? sampleFamilyTree;
-  });
+  const {
+    state: treeData,
+    setState: setTreeData,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    reset: resetTreeData,
+  } = useUndoableState<FamilyTreeData>(
+    loadFromStorage() ?? sampleFamilyTree,
+  );
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [kinshipResult, setKinshipResult] = useState<KinshipResult | null>(null);
   const [siderMode, setSiderMode] = useState<SiderMode>('view');
   const [ancestorPathId, setAncestorPathId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('tree');
 
   const savedDataRef = useRef<string>(JSON.stringify(treeData));
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -332,7 +342,7 @@ export default function App() {
       alert('数据校验失败:\n' + errors.join('\n'));
       return;
     }
-    setTreeData(data);
+    resetTreeData(data);
     setSelectedIds([]);
     setKinshipResult(null);
     setSiderMode('view');
@@ -341,7 +351,44 @@ export default function App() {
     savedDataRef.current = JSON.stringify(data);
     setHasUnsavedChanges(false);
     message.success('导入成功');
-  }, []);
+  }, [resetTreeData]);
+
+  const handleExportGedcom = useCallback(() => {
+    try {
+      const gedcom = exportToGedcom(treeData);
+      const blob = new Blob([gedcom], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '族谱-' + treeData.meta.familyName + '-' + new Date().toISOString().slice(0, 10) + '.ged';
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('GEDCOM 导出成功');
+    } catch (e) {
+      message.error('GEDCOM 导出失败');
+    }
+  }, [treeData]);
+
+  const handleImportGedcom = useCallback((text: string) => {
+    try {
+      const data = parseGedcom(text);
+      const errors = validateFamilyTreeData(data);
+      if (errors.length > 0) {
+        alert('GEDCOM 导入后有数据校验警告:\n' + errors.join('\n') + '\n\n已导入数据，请手动核对。');
+      }
+      resetTreeData(data);
+      setSelectedIds([]);
+      setKinshipResult(null);
+      setSiderMode('view');
+      setSavedFileName(undefined);
+      removeStoredFileHandle();
+      savedDataRef.current = JSON.stringify(data);
+      setHasUnsavedChanges(false);
+      message.success(`GEDCOM 导入成功（${data.persons.length}人）`);
+    } catch (e) {
+      message.error('GEDCOM 解析失败: ' + (e as Error).message);
+    }
+  }, [resetTreeData]);
 
   const handleClearSelection = useCallback(() => {
     setSelectedIds([]);
@@ -448,6 +495,21 @@ export default function App() {
     setSiderMode('view');
   }, []);
 
+  // 撤销/重做键盘快捷键
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 不在输入框/文本域中时才响应
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      const isUndo = (e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey;
+      const isRedo = (e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey));
+      if (isUndo) { e.preventDefault(); undo(); }
+      else if (isRedo) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
   // 共享的面板 props
   const panelProps = {
     siderMode,
@@ -504,6 +566,14 @@ export default function App() {
           hasUnsavedChanges={hasUnsavedChanges}
           savedFileName={savedFileName}
           isMobile={isMobile}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onUndo={undo}
+          onRedo={redo}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onExportGedcom={handleExportGedcom}
+          onImportGedcom={handleImportGedcom}
         />
 
         {isMobile ? (
@@ -516,6 +586,7 @@ export default function App() {
               ancestorPathId={ancestorPathId}
               showLeafMark={showLeafMark}
               showIncompleteMark={showIncompleteMark}
+              viewMode={viewMode}
               onNodeSelect={handleNodeSelect}
               onKinshipResult={handleKinshipResult}
             />
@@ -602,6 +673,7 @@ export default function App() {
                 ancestorPathId={ancestorPathId}
                 showLeafMark={showLeafMark}
                 showIncompleteMark={showIncompleteMark}
+                viewMode={viewMode}
                 onNodeSelect={handleNodeSelect}
                 onKinshipResult={handleKinshipResult}
               />
