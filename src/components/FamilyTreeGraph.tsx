@@ -35,6 +35,13 @@ const DEFAULT_COLOR = '#7f8c8d';
 const FEMALE_COLOR = '#ad1457';
 const ANIMATION_NODE_THRESHOLD = 200;
 
+/** 节点默认尺寸 */
+const NODE_DEFAULT_SIZE: [number, number] = [130, 44];
+/** 选中节点放大后的尺寸（约1.5倍） */
+const NODE_ENLARGED_SIZE: [number, number] = [200, 68];
+/** 选中节点的 zIndex（置顶显示，遮挡后方节点） */
+const NODE_ENLARGED_ZINDEX = 999;
+
 function getBranchColor(branch: string | null): string {
   if (!branch) return DEFAULT_COLOR;
   let hash = 0x811c9dc5;
@@ -192,6 +199,8 @@ export default function FamilyTreeGraph({
   const prevHighlightRef = useRef<string[]>([]);
   const prevYearHighlightRef = useRef<string[]>([]);
   const prevAncestorHighlightRef = useRef<string[]>([]);
+  /** 上一次被放大的节点 ID（用于切换选中时恢复原尺寸/层级） */
+  const prevEnlargedIdRef = useRef<string | null>(null);
   const onNodeSelectRef = useRef(onNodeSelect);
   const onKinshipResultRef = useRef(onKinshipResult);
   const selectedIdsRef = useRef(selectedIds);
@@ -411,6 +420,30 @@ export default function FamilyTreeGraph({
       }
       prevHighlightRef.current = [];
     }
+
+    // ---- 选中节点放大 + 置顶 ----
+    // 恢复上一次被放大的节点：尺寸回归默认、层级回归默认
+    const prevEnlarged = prevEnlargedIdRef.current;
+    if (prevEnlarged && !graph.destroyed && graph.hasNode(prevEnlarged)) {
+      try {
+        graph.updateNodeData([{ id: prevEnlarged, style: { size: NODE_DEFAULT_SIZE } }]);
+        graph.setElementZIndex(prevEnlarged, 0);
+      } catch {}
+    }
+    prevEnlargedIdRef.current = null;
+
+    // 放大当前选中节点并置顶（仅单选时）
+    if (selectedIds.length > 0 && !graph.destroyed) {
+      const targetId = selectedIds[0];
+      if (graph.hasNode(targetId)) {
+        try {
+          graph.updateNodeData([{ id: targetId, style: { size: NODE_ENLARGED_SIZE } }]);
+          graph.setElementZIndex(targetId, NODE_ENLARGED_ZINDEX);
+          prevEnlargedIdRef.current = targetId;
+        } catch {}
+      }
+    }
+    // ---- 选中节点放大 + 置顶 END ----
 
     if (selectedIds.length === 0) return;
 
