@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Graph, treeToGraphData, register, Rect } from '@antv/g6';
 import type { Point } from '@antv/g6';
 import { Text } from '@antv/g';
@@ -42,6 +42,29 @@ const NODE_ENLARGED_SIZE: [number, number] = [200, 68];
 /** 选中节点的 zIndex（置顶显示，遮挡后方节点） */
 const NODE_ENLARGED_ZINDEX = 999;
 
+/**
+ * 缩放分档与布局间距系数。
+ * 扇形图深层节点挤在圆弧上会互相覆盖，单纯缩放是等比放大、重叠不会消失；
+ * 因此按缩放级别分档：放大跨过阈值后自动以更大的间距重新布局，
+ * 相当于"zoom in 时把覆盖的节点展开"。缩小时则收回间距，保持全局视野紧凑。
+ */
+const ZOOM_TIERS: { minZoom: number; gapFactor: number }[] = [
+  { minZoom: 0, gapFactor: 1 },
+  { minZoom: 0.55, gapFactor: 1.8 },
+  { minZoom: 1.0, gapFactor: 3 },
+];
+
+function getZoomTier(zoom: number): number {
+  let tier = 0;
+  for (let i = 0; i < ZOOM_TIERS.length; i++) {
+    if (zoom >= ZOOM_TIERS[i].minZoom) tier = i;
+  }
+  return tier;
+}
+
+/** 切换间距档位的防抖时间（ms）：连续缩放稳定后再触发重排，避免来回抖动 */
+const ZOOM_TIER_DEBOUNCE_MS = 300;
+
 function getBranchColor(branch: string | null): string {
   if (!branch) return DEFAULT_COLOR;
   let hash = 0x811c9dc5;
@@ -53,10 +76,21 @@ function getBranchColor(branch: string | null): string {
   return `hsl(${hue}, 55%, 50%)`;
 }
 
+/** 多个始祖时使用的虚拟根节点 ID */
+export const VIRTUAL_ROOT_ID = '__virtual_root__';
+
 let registered = false;
 
 function ensureCustomNodeRegistered() {
   if (registered) return;
+
+  class FamilyVirtualRoot extends Rect {
+    protected drawLabelShape(): void {}
+    protected drawIconShape(): void {}
+    protected drawHaloShape(): void {}
+  }
+
+  register('node', 'family-virtual-root', FamilyVirtualRoot);
 
   class FamilyNode extends Rect {
     protected drawLabelShape(attributes: any, container: Group): void {
@@ -133,6 +167,34 @@ function ensureCustomNodeRegistered() {
   registered = true;
 }
 
+/** 构建单个节点的视觉样式（全量建树与增量更新共用，不含 size 等布局属性） */
+function buildNodeStylePatch(person: Person, hasChildren: boolean, isCollapsed: boolean) {
+  const branchColor = getBranchColor(person.branch);
+  const nodeColor = person.gender === 'female' ? FEMALE_COLOR : branchColor;
+  const migrationPart = person.migrationLocation ? '→' + person.migrationLocation : '';
+  const subText = person.branch
+    ? person.generation + '世·' + person.branch + migrationPart
+    : person.generation + '世' + migrationPart;
+
+  const isFlagged = person.needsVerification;
+  return {
+    fill: nodeColor,
+    stroke: isFlagged ? '#ff4d4f' : '#fff',
+    lineWidth: isFlagged ? 3 : 2,
+    lineDash: isFlagged ? [4, 2] : undefined,
+    shadowColor: isFlagged ? 'rgba(255,77,79,0.35)' : 'rgba(0,0,0,0.12)',
+    shadowBlur: isFlagged ? 8 : 4,
+    shadowOffsetY: 2,
+    personName: person.name,
+    personSubText: subText,
+    hasChildren,
+    collapsed: isCollapsed,
+    needsVerification: isFlagged,
+    migrationLocation: person.migrationLocation,
+    birthDateInferred: person.birthDateInferred,
+  };
+}
+
 function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
   const personMap = buildPersonMap(data.persons);
   const childrenMap = buildChildrenMap(data.persons);
@@ -141,37 +203,19 @@ function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
   if (roots.length === 0) return { id: 'empty' };
 
   function buildNode(person: Person): any {
-    const branchColor = getBranchColor(person.branch);
-    const nodeColor = person.gender === 'female' ? FEMALE_COLOR : branchColor;
     const childIds = getChildren(person.id, childrenMap);
-    const migrationPart = person.migrationLocation ? '→' + person.migrationLocation : '';
-    const subText = person.branch
-      ? person.generation + '世·' + person.branch + migrationPart
-      : person.generation + '世' + migrationPart;
-
-    const isFlagged = person.needsVerification;
-    const isCollapsed = collapsedIds.has(person.id);
     return {
       id: person.id,
       type: 'family-node',
-      data: { ...person, nodeColor },
+      data: { ...person },
       style: {
         size: [130, 44],
-        fill: nodeColor,
-        stroke: isFlagged ? '#ff4d4f' : '#fff',
-        lineWidth: isFlagged ? 3 : 2,
-        lineDash: isFlagged ? [4, 2] : undefined,
         radius: 6,
-        shadowColor: isFlagged ? 'rgba(255,77,79,0.35)' : 'rgba(0,0,0,0.12)',
-        shadowBlur: isFlagged ? 8 : 4,
-        shadowOffsetY: 2,
-        personName: person.name,
-        personSubText: subText,
-        hasChildren: childIds.length > 0,
-        collapsed: isCollapsed,
-        needsVerification: isFlagged,
-        migrationLocation: person.migrationLocation,
-        birthDateInferred: person.birthDateInferred,
+        ...buildNodeStylePatch(
+          person,
+          childIds.length > 0,
+          collapsedIds.has(person.id),
+        ),
         label: false,
         icon: false,
       },
@@ -179,7 +223,47 @@ function transformToTreeData(data: FamilyTreeData, collapsedIds: Set<string>) {
     };
   }
 
-  return buildNode(roots[0]);
+  if (roots.length === 1) {
+    return buildNode(roots[0]);
+  }
+
+  // 多个始祖：挂到透明虚拟根节点下，保证所有分支都显示
+  return {
+    id: VIRTUAL_ROOT_ID,
+    type: 'family-virtual-root',
+    data: {},
+    style: {
+      size: [10, 10],
+      fill: 'rgba(0,0,0,0)',
+      stroke: 'rgba(0,0,0,0)',
+      lineWidth: 0,
+      label: false,
+      icon: false,
+      halo: false,
+      badge: false,
+    },
+    children: roots.map((root) => buildNode(root)),
+  };
+}
+
+/** 增量更新：拓扑不变时仅刷新各节点视觉样式（姓名/徽标/颜色等），不重建画布 */
+function applyVisualUpdates(graph: Graph, data: FamilyTreeData, collapsedIds: Set<string>) {
+  const childrenMap = buildChildrenMap(data.persons);
+  const patches: { id: string; style: ReturnType<typeof buildNodeStylePatch> }[] = [];
+  for (const p of data.persons) {
+    if (!graph.hasNode(p.id)) continue;
+    patches.push({
+      id: p.id,
+      style: buildNodeStylePatch(
+        p,
+        (childrenMap.get(p.id) ?? []).length > 0,
+        collapsedIds.has(p.id),
+      ),
+    });
+  }
+  if (patches.length === 0) return;
+  graph.updateNodeData(patches as any);
+  graph.draw().catch(() => {});
 }
 
 export default function FamilyTreeGraph({
@@ -212,16 +296,79 @@ export default function FamilyTreeGraph({
   const graphReadyRef = useRef(false);
   const generationRef = useRef(0);
   const [renderVersion, setRenderVersion] = useState(0);
+  /** 当前缩放档位（跨过阈值后加大布局间距，展开扇形图中覆盖的节点） */
+  const [zoomTier, setZoomTier] = useState(0);
+  const zoomTierRef = useRef(0);
+  const zoomTierTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   onNodeSelectRef.current = onNodeSelect;
   onKinshipResultRef.current = onKinshipResult;
   selectedIdsRef.current = selectedIds;
 
-  // 数据变化：销毁重建图（G6 树图最可靠的方式），但保存缩放和折叠状态
+  // 结构签名：仅 persons 的父子拓扑 + 视图模式 + 缩放档位。
+  // 结构未变时走增量更新，避免整图重建闪烁；档位变化则触发重排（展开覆盖节点）
+  const structureKey = useMemo(
+    () =>
+      viewMode +
+      '|' +
+      zoomTier +
+      '|' +
+      data.persons
+        .map((p) => `${p.id}>${p.parentId ?? ''}`)
+        .sort()
+        .join(';'),
+    [data.persons, viewMode, zoomTier],
+  );
+  const lastStructureKeyRef = useRef<string | null>(null);
+
+  // 卸载时兜底销毁图实例（各轮 effect 的 cleanup 均为空操作，销毁统一在这里）
+  useEffect(() => {
+    return () => {
+      if (zoomTierTimerRef.current) clearTimeout(zoomTierTimerRef.current);
+      const g = graphRef.current;
+      if (g) {
+        try { g.destroy(); } catch {}
+        graphRef.current = null;
+      }
+      graphReadyRef.current = false;
+      (window as any).__familyTreeGraph = undefined;
+    };
+  }, []);
+
+  // 数据变化：结构未变 → 增量更新节点样式；结构变化（增删人/改父/切视图）→ 销毁重建
   useEffect(() => {
     const gen = ++generationRef.current;
     if (!containerRef.current) return;
 
+    // ---- 增量更新路径：拓扑不变，仅刷新视觉（姓名/徽标/颜色等），无闪烁 ----
+    const existing = graphRef.current;
+    if (
+      existing &&
+      !existing.destroyed &&
+      graphReadyRef.current &&
+      lastStructureKeyRef.current === structureKey
+    ) {
+      try {
+        applyVisualUpdates(existing, data, collapsedIdsRef.current);
+      } catch {}
+      setRenderVersion(v => v + 1);
+      return () => {};
+    }
+
+    // ---- 全量重建路径 ----
+    // 销毁残留旧图（上一轮可能是增量更新，cleanup 未销毁），销毁前保存视口
+    if (existing && !existing.destroyed) {
+      if (graphReadyRef.current) {
+        try {
+          savedViewportRef.current = {
+            zoom: existing.getZoom(),
+            selectedNodeId: selectedIdsRef.current[0],
+          };
+        } catch {}
+      }
+      try { existing.destroy(); } catch {}
+      graphRef.current = null;
+    }
     graphReadyRef.current = false;
     if (containerRef.current.childElementCount > 0) {
       containerRef.current.innerHTML = '';
@@ -254,30 +401,33 @@ export default function FamilyTreeGraph({
         state: { highlight: { stroke: '#ffd43b', lineWidth: 3 } },
       },
       layout:
-        viewMode === 'radial'
-          ? {
-              type: 'compact-box',
-              direction: 'TB',
-              radial: true,
-              getHGap: () => 30, getVGap: () => 80,
-              getWidth: () => 130, getHeight: () => 44,
-            }
-          : viewMode === 'pagoda'
+        (() => {
+          const f = ZOOM_TIERS[zoomTier].gapFactor;
+          return viewMode === 'radial'
             ? {
-                type: 'dendrogram',
-                direction: 'TB',
-                nodeSep: 150,
-                rankSep: 80,
-                subTreeSep: 30,
-                getHGap: () => 10, getVGap: () => 80,
-                getWidth: () => 130, getHeight: () => 44,
-              }
-            : {
                 type: 'compact-box',
                 direction: 'TB',
-                getHGap: () => 20, getVGap: () => 60,
+                radial: true,
+                getHGap: () => 30 * f, getVGap: () => 80 * f,
                 getWidth: () => 130, getHeight: () => 44,
-              },
+              }
+            : viewMode === 'pagoda'
+              ? {
+                  type: 'dendrogram',
+                  direction: 'TB',
+                  nodeSep: 150 * f,
+                  rankSep: 80 * f,
+                  subTreeSep: 30 * f,
+                  getHGap: () => 10 * f, getVGap: () => 80 * f,
+                  getWidth: () => 130, getHeight: () => 44,
+                }
+              : {
+                  type: 'compact-box',
+                  direction: 'TB',
+                  getHGap: () => 20 * f, getVGap: () => 60 * f,
+                  getWidth: () => 130, getHeight: () => 44,
+                };
+        })(),
       behaviors: [
         { type: 'drag-canvas', enable: true },
         'zoom-canvas',
@@ -297,7 +447,8 @@ export default function FamilyTreeGraph({
 
     graph.on('node:click', (evt: any) => {
       const nodeId = evt.target?.id;
-      if (nodeId) {
+      // 虚拟根节点仅用于布局，不可选中
+      if (nodeId && nodeId !== VIRTUAL_ROOT_ID) {
         const originalEvent = evt.originalEvent as MouseEvent | undefined;
         const isMulti = originalEvent?.ctrlKey || originalEvent?.metaKey;
         onNodeSelectRef.current(nodeId, !!isMulti);
@@ -305,6 +456,28 @@ export default function FamilyTreeGraph({
     });
 
     (window as any).__familyTreeGraph = graph;
+
+    // 缩放分档监听：跨过阈值并稳定 ZOOM_TIER_DEBOUNCE_MS 后切换间距档位，
+    // 触发本 effect 以更大/更小的 gapFactor 重新布局（zoom in 展开覆盖节点）
+    graph.on('viewportchange', (evt: any) => {
+      if (!graphReadyRef.current || evt?.action !== 'zoom') return;
+      const tier = getZoomTier(graph.getZoom());
+      if (tier === zoomTierRef.current) {
+        if (zoomTierTimerRef.current) {
+          clearTimeout(zoomTierTimerRef.current);
+          zoomTierTimerRef.current = undefined;
+        }
+        return;
+      }
+      if (zoomTierTimerRef.current) clearTimeout(zoomTierTimerRef.current);
+      zoomTierTimerRef.current = setTimeout(() => {
+        zoomTierTimerRef.current = undefined;
+        const stable = getZoomTier(graph.getZoom());
+        if (graph.destroyed || stable === zoomTierRef.current) return;
+        zoomTierRef.current = stable;
+        setZoomTier(stable);
+      }, ZOOM_TIER_DEBOUNCE_MS);
+    });
 
     const saved = savedViewportRef.current;
     savedViewportRef.current = null;
@@ -328,27 +501,13 @@ export default function FamilyTreeGraph({
       }
       if (generationRef.current !== gen || graph.destroyed) return;
       graphReadyRef.current = true;
+      lastStructureKeyRef.current = structureKey;
       setRenderVersion(v => v + 1);
     }).catch(() => {});
 
-    return () => {
-      const g = graphRef.current;
-      if (g) {
-        if (graphReadyRef.current) {
-          try {
-            savedViewportRef.current = {
-              zoom: g.getZoom(),
-              selectedNodeId: selectedIdsRef.current[0],
-            };
-          } catch {}
-        }
-        try { g.destroy(); } catch {}
-        graphRef.current = null;
-      }
-      graphReadyRef.current = false;
-      (window as any).__familyTreeGraph = undefined;
-    };
-    }, [data, viewMode]);
+    // 销毁职责统一由下一轮重建路径或卸载兜底 effect 承担
+    return () => {};
+    }, [data, viewMode, structureKey, zoomTier]);
 
         // 监听容器尺寸变化，自动同步 G6 画布大小
   // 解决：左侧栏折叠/展开后容器宽度变化，但 G6 画布尺寸未跟随更新，
