@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { Person, FamilyTreeData, Spouse, Gender, PersonalEvent } from '../types';
-import { buildChildrenMap } from './tree';
+import { buildChildrenMap, getDescendants } from './tree';
 
 /** 生成唯一人物 ID */
 export function generatePersonId(): string {
@@ -111,6 +111,18 @@ export function updatePerson(
 ): FamilyTreeData {
   const oldPerson = data.persons.find((p) => p.id === personId);
   if (!oldPerson) throw new Error('人物不存在: ' + personId);
+
+  // 父节点变更时校验：新父不能是自己或自己的后代，否则会形成环
+  if (updates.parentId !== undefined && updates.parentId !== null) {
+    if (updates.parentId === personId) {
+      throw new Error('不能将人物设为自己的父节点');
+    }
+    const childrenMap = buildChildrenMap(data.persons);
+    const descendantIds = new Set(getDescendants(personId, childrenMap));
+    if (descendantIds.has(updates.parentId)) {
+      throw new Error('不能将父节点设置为该人物的后代，会形成循环谱系');
+    }
+  }
 
   const updatedPerson: Person = { ...oldPerson, ...updates };
 

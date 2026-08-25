@@ -274,7 +274,23 @@ export function parseGedcom(text: string): FamilyTreeData {
       const indi: IndiRec = { id: node.xref, sex: 'male', fams: [] };
       for (const child of node.children) {
         switch (child.tag) {
-          case 'NAME': indi.name = child.value; break;
+          case 'NAME': {
+            indi.name = child.value;
+            // 标准 GEDCOM 中 GIVN/SURN 是 NAME 的下级记录（level 2），
+            // 在本解析器的行树中挂在 NAME 节点之下，需从这里读取
+            const givnChild = findChild(child, 'GIVN');
+            const surnChild = findChild(child, 'SURN');
+            if (givnChild?.value) indi.givn = givnChild.value;
+            if (surnChild?.value) {
+              indi.surn = surnChild.value;
+              if (familyName === '未知') familyName = surnChild.value;
+            } else if (familyName === '未知') {
+              // 无显式 SURN 标签时，从 NAME 的 "/surname/" 部分提取家族姓氏
+              const m = child.value.match(/\/(.*)\//);
+              if (m?.[1]) familyName = m[1].trim();
+            }
+            break;
+          }
           case 'GIVN': indi.givn = child.value; break;
           case 'SURN': {
             indi.surn = child.value;
@@ -304,22 +320,34 @@ export function parseGedcom(text: string): FamilyTreeData {
   }
 
   // 推断血脉人物 vs 配偶
+  // 族谱语义：与家族同姓的一方为血脉，异姓一方为嫁入的配偶。
+  // 若双方都同姓或都异姓（无法区分），则回退为都视为血脉人物。
   const bloodIndiIds = new Set<string>();
+  const isSameSurname = (indiId: string) => indis.get(indiId)?.surn === familyName;
   for (const fam of fams.values()) {
     const partners = [fam.husb, fam.wife].filter(Boolean) as string[];
     if (fam.children.length > 0) {
-      for (const p of partners) bloodIndiIds.add(p);
+      const sameSurname = partners.filter(isSameSurname);
+      for (const p of sameSurname.length > 0 ? sameSurname : partners) bloodIndiIds.add(p);
       for (const childId of fam.children) bloodIndiIds.add(childId);
     }
   }
   for (const indi of indis.values()) { if (indi.famc) bloodIndiIds.add(indi.id); }
-  // 无子女 FAM 中的双方也视为血脉人物（可能是叶子节点）
+  // 无任何家庭关联的独立 INDI（如未婚且无后代的叶子）也视为血脉人物，避免导入时被丢弃
+  for (const indi of indis.values()) {
+    if (indi.fams.length === 0 && !indi.famc) bloodIndiIds.add(indi.id);
+  }
+  // 无子女 FAM：仅保留与家族同姓的一方（叶子节点），异姓方视为配偶
   for (const fam of fams.values()) {
-    for (const p of [fam.husb, fam.wife].filter(Boolean) as string[]) {
+    if (fam.children.length > 0) continue;
+    const partners = [fam.husb, fam.wife].filter(Boolean) as string[];
+    const anySameSurname = partners.some(isSameSurname);
+    for (const p of partners) {
       if (bloodIndiIds.has(p)) continue;
       let hasChild = false;
       for (const f of fams.values()) { if (f.children.includes(p)) { hasChild = true; break; } }
-      if (!hasChild) bloodIndiIds.add(p);
+      if (hasChild) continue;
+      if (!anySameSurname || isSameSurname(p)) bloodIndiIds.add(p);
     }
   }
 

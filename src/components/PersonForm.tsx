@@ -120,9 +120,11 @@ export default function PersonForm({
   }, [mode, person, parentPerson, form]);
 
   const handleFinish = (values: any) => {
+    // 编辑模式下保留原有配偶的 id（按位置对应），仅新增的配偶生成新 id，
+    // 避免每次保存都更换 id 导致配偶身份不稳定
     const spouses: Spouse[] = (values.spouses || []).map(
-      (s: { name: string; type: string; birthDate?: string; deathDate?: string }) => ({
-        id: generateSpouseId(),
+      (s: { name: string; type: string; birthDate?: string; deathDate?: string }, i: number) => ({
+        id: person?.spouses[i]?.id ?? generateSpouseId(),
         name: s.name,
         type: s.type as Spouse['type'],
         birthDate: s.birthDate?.trim() || null,

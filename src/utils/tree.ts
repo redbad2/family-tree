@@ -84,8 +84,8 @@ export function findShortestPath(
   const pathB = pathToAncestor(idB, lca, personMap);
 
   // pathA: A -> ... -> LCA, pathB: B -> ... -> LCA
-  // 合并：A -> ... -> LCA -> ... -> B (LCA 只出现一次)
-  return [...pathA, ...pathB.slice(1).reverse()];
+  // 合并：A -> ... -> LCA -> ... -> B（LCA 只出现一次，去掉 pathB 末尾的 LCA 后反转）
+  return [...pathA, ...pathB.slice(0, pathB.length - 1).reverse()];
 }
 
 /** 获取某节点的直系子节点 */
@@ -139,6 +139,10 @@ export function validateFamilyTreeData(data: FamilyTreeData): string[] {
     if (p.parentId && !personIds.has(p.parentId)) {
       errors.push(`人物 "${p.name}"(id=${p.id}) 的父节点 ${p.parentId} 不存在`);
     }
+    // parentId 自引用
+    if (p.parentId === p.id) {
+      errors.push(`人物 "${p.name}"(id=${p.id}) 不能是自己的父节点`);
+    }
   }
 
   for (const r of data.relations) {
@@ -147,6 +151,49 @@ export function validateFamilyTreeData(data: FamilyTreeData): string[] {
     }
     if (!personIds.has(r.child)) {
       errors.push(`关系中的子节点 ${r.child} 不存在`);
+    }
+  }
+
+  // 环检测：沿 parentId 链向上走，若回到已访问节点说明有环
+  const personMap = buildPersonMap(data.persons);
+  const reportedCycleNodes = new Set<string>();
+  for (const p of data.persons) {
+    const visited = new Set<string>([p.id]);
+    let current = personMap.get(p.id);
+    while (current?.parentId) {
+      if (visited.has(current.parentId)) {
+        if (!reportedCycleNodes.has(current.parentId)) {
+          reportedCycleNodes.add(current.parentId);
+          errors.push(`谱系中存在循环：从 "${p.name}"(id=${p.id}) 沿父链可回到 "${current.parentId}"`);
+        }
+        break;
+      }
+      visited.add(current.parentId);
+      current = personMap.get(current.parentId);
+    }
+  }
+
+  // 生卒年合法性 + 父子年份合理性
+  for (const p of data.persons) {
+    const birthYear = getYear(p.birthDate);
+    const deathYear = getYear(p.deathDate);
+    if (birthYear != null && deathYear != null && deathYear < birthYear) {
+      errors.push(`人物 "${p.name}" 的去世年份(${deathYear})早于出生年份(${birthYear})`);
+    }
+    if (birthYear == null || !p.parentId) continue;
+    const parent = personMap.get(p.parentId);
+    if (!parent) continue;
+    const parentBirthYear = getYear(parent.birthDate);
+    if (parentBirthYear == null) continue;
+    const gap = birthYear - parentBirthYear;
+    if (gap < 10) {
+      errors.push(
+        `人物 "${p.name}"(生于${birthYear}) 比其父 "${parent.name}"(生于${parentBirthYear}) 出生仅晚 ${gap} 年，疑似数据错误`,
+      );
+    } else if (gap > 90) {
+      errors.push(
+        `人物 "${p.name}"(生于${birthYear}) 与其父 "${parent.name}"(生于${parentBirthYear}) 相差 ${gap} 年，超出合理生育年龄，请核实`,
+      );
     }
   }
 

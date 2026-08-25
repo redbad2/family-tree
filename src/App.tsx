@@ -461,20 +461,24 @@ export default function App() {
 
   const handleFormSubmit = useCallback(
     (values: any) => {
-      if (siderMode === 'add-child' && selectedPerson) {
-        const newData = addChildPerson(treeData, selectedPerson.id, values);
-        setTreeData(newData);
-        setSelectedIds([selectedPerson.id]);
-      } else if (siderMode === 'add-root') {
-        const newData = addRootPerson(treeData, values);
-        setTreeData(newData);
-        const newPerson = newData.persons[newData.persons.length - 1];
-        setSelectedIds([newPerson.id]);
-      } else if (siderMode === 'edit' && selectedPerson) {
-        const newData = updatePerson(treeData, selectedPerson.id, values);
-        setTreeData(newData);
+      try {
+        if (siderMode === 'add-child' && selectedPerson) {
+          const newData = addChildPerson(treeData, selectedPerson.id, values);
+          setTreeData(newData);
+          setSelectedIds([selectedPerson.id]);
+        } else if (siderMode === 'add-root') {
+          const newData = addRootPerson(treeData, values);
+          setTreeData(newData);
+          const newPerson = newData.persons[newData.persons.length - 1];
+          setSelectedIds([newPerson.id]);
+        } else if (siderMode === 'edit' && selectedPerson) {
+          const newData = updatePerson(treeData, selectedPerson.id, values);
+          setTreeData(newData);
+        }
+        setSiderMode('view');
+      } catch (e) {
+        message.error((e as Error).message || '保存失败');
       }
-      setSiderMode('view');
     },
     [siderMode, selectedPerson, treeData],
   );
